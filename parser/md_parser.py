@@ -120,6 +120,14 @@ class MarkdownParser:
         in_exec_summary = False
         exec_summary_parts: list[str] = []
         pending_section_content = ""
+        # True once ANY H2/H3 has been encountered after the H1. Used to stop
+        # the subtitle-auto-capture from stealing paragraphs that belong to
+        # the first real section (e.g. the Executive Summary).
+        past_top_matter = False
+        # True when we're inside a Table-of-Contents or References H2 that
+        # we've chosen to skip. Any H3 encountered while this is set must
+        # also be suppressed (no implicit section promotion).
+        in_skipped_h2 = False
 
         # ------------------------------------------------------------------
         # Helper: flush subsection into current section
@@ -162,16 +170,43 @@ class MarkdownParser:
                 elif level == 2:
                     flush_subsection()
                     flush_section()
+                    past_top_matter = True
+                    # Skip Table of Contents and References sections entirely.
+                    _low = heading_text.lower().strip().lstrip("0123456789. ")
+                    if (
+                        _low.startswith("table of contents")
+                        or _low.startswith("contents")
+                        or _low.startswith("references")
+                        or _low.startswith("bibliography")
+                        or _low.startswith("appendix")
+                    ):
+                        in_exec_summary = False
+                        in_skipped_h2 = True
+                        current_section = None
+                        current_subsection = None
+                        pending_section_content = ""
+                        continue
+                    in_skipped_h2 = False
                     in_exec_summary = "executive summary" in heading_text.lower()
                     if not in_exec_summary:
                         current_section = self._new_section(heading_text)
                     pending_section_content = ""
 
                 elif level == 3:
+                    # Any H3 under a skipped H2 must also be suppressed.
+                    if in_skipped_h2:
+                        continue
+                    # H3 before any H2 and no subtitle yet → treat as subtitle.
+                    if current_section is None and not found_subtitle and not past_top_matter:
+                        doc["subtitle"] = heading_text
+                        found_subtitle = True
+                        continue
                     flush_subsection()
                     in_exec_summary = False
+                    past_top_matter = True
                     if current_section is None:
-                        # H3 before any H2 — create an implicit section
+                        # H3 before any H2 (but subtitle already taken) —
+                        # create an implicit section.
                         current_section = self._new_section(heading_text)
                     current_subsection = self._new_subsection(heading_text, 3)
 
@@ -187,8 +222,16 @@ class MarkdownParser:
                 text = self._extract_text(token).strip()
                 if not text:
                     continue
+                if in_skipped_h2:
+                    continue
 
-                if found_h1 and not found_subtitle and current_section is None:
+                if (
+                    found_h1
+                    and not found_subtitle
+                    and current_section is None
+                    and not in_exec_summary
+                    and not past_top_matter
+                ):
                     doc["subtitle"] = text
                     found_subtitle = True
 
@@ -212,6 +255,8 @@ class MarkdownParser:
 
             # ---- Lists ---------------------------------------------------
             elif t == "list":
+                if in_skipped_h2:
+                    continue
                 bullets = self._extract_bullets(token)
                 if not bullets:
                     continue

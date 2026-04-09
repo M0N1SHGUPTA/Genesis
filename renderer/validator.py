@@ -14,8 +14,8 @@ Rules enforced:
   1. First slide must be "cover"
   2. Last slide must be "thank_you"
   3. Every slide must have a non-empty "title"
-  4. Cover subtitle ≤ 20 words
-  5. All bullet / point text ≤ 15 words
+  4. Cover subtitle ≤ 22 words
+  5. All bullet / point text ≤ 22 words (hard upper bound to prevent overflow)
   6. points / cards / items / stats / steps arrays must not be empty
   7. three_cards must have exactly 3 cards
   8. key_stats must have 2–4 stats
@@ -130,24 +130,33 @@ class DesignEnforcer:
     # ------------------------------------------------------------------
 
     def _fix_cover_subtitle(self, slide: dict) -> None:
-        """Truncate cover subtitle to 20 words if needed."""
+        """Truncate cover subtitle to 22 words if needed."""
         if slide.get("type") != "cover":
             return
         subtitle = slide.get("subtitle", "")
         if not subtitle:
             return
         words = subtitle.split()
-        if len(words) > 20:
-            slide["subtitle"] = " ".join(words[:20]) + "…"
-            logger.debug("Validator: truncated cover subtitle to 20 words.")
+        if len(words) > 22:
+            slide["subtitle"] = " ".join(words[:22]) + "…"
+            logger.debug("Validator: truncated cover subtitle to 22 words.")
 
     # ------------------------------------------------------------------
     # Rule 5: Bullet text ≤ 15 words
     # ------------------------------------------------------------------
 
     def _fix_bullet_lengths(self, slide: dict) -> None:
-        """Trim any bullet / point string that exceeds 15 words."""
-        _truncate = lambda t: " ".join(t.split()[:15]) + ("…" if len(t.split()) > 15 else "")
+        """Trim any bullet / point string that exceeds 22 words.
+
+        22 words is the upper bound chosen so slides still fit without
+        overflow while leaving room for real, fact-bearing sentences
+        (company names, dollar figures, dates) that 15 words would chop.
+        """
+        def _truncate(t: str, n: int = 22) -> str:
+            words = t.split()
+            if len(words) <= n:
+                return t
+            return " ".join(words[:n]) + "…"
 
         # top-level "points" (agenda, single_focus, conclusion)
         if "points" in slide:
@@ -167,18 +176,16 @@ class DesignEnforcer:
         # timeline / process_flow: steps[*].description
         for step in slide.get("steps", []):
             if "description" in step:
-                step["description"] = _truncate(step["description"])
+                step["description"] = _truncate(step["description"], 18)
 
         # icon_list: items[*].description
         for item in slide.get("items", []):
             if "description" in item:
                 item["description"] = _truncate(item["description"])
 
-        # single_focus: "focus" field
+        # single_focus: "focus" field — allow up to 25 words for synthesis
         if "focus" in slide:
-            words = slide["focus"].split()
-            if len(words) > 20:
-                slide["focus"] = " ".join(words[:20]) + "…"
+            slide["focus"] = _truncate(slide["focus"], 25)
 
     # ------------------------------------------------------------------
     # Rule 6: No empty arrays

@@ -32,8 +32,8 @@ MARGIN_BOTTOM = Inches(0.5)   # bottom safe boundary
 # The usable horizontal span for content (slide width minus both side margins)
 CONTENT_WIDTH = SLIDE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT   # ≈ 12.13 inches
 
-# Where body content starts vertically — below the title area (title is ~1.1" tall + gap)
-CONTENT_TOP = Inches(1.6)
+# Where body content starts vertically — below the title area (title is ~1.2" tall + gap)
+CONTENT_TOP = Inches(1.9)
 
 # Usable vertical span for content (below title, above bottom margin)
 CONTENT_HEIGHT = SLIDE_HEIGHT - CONTENT_TOP - MARGIN_BOTTOM  # ≈ 5.4 inches

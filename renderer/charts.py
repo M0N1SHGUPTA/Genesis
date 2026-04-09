@@ -71,10 +71,12 @@ def render_chart_slide(slide, slide_data: dict, slide_num: int) -> None:
     caption = slide_data.get("caption", "")
     caption_height = Inches(0.4) if caption else 0
 
+    # Leave side margins so the chart doesn't stretch edge-to-edge
+    chart_h_margin = Inches(0.5)
     pos = ChartPosition(
-        left=config.MARGIN_LEFT,
+        left=config.MARGIN_LEFT + chart_h_margin,
         top=config.CONTENT_TOP,
-        width=config.CONTENT_WIDTH,
+        width=config.CONTENT_WIDTH - 2 * chart_h_margin,
         # Reserve space for caption + gap at the bottom
         height=config.CONTENT_HEIGHT - caption_height - config.ELEMENT_GAP,
     )
@@ -142,21 +144,34 @@ def _add_chart(slide, chart_type_str: str, data: dict, pos: ChartPosition) -> No
     if not categories or not series_list:
         raise ValueError("Chart data missing 'categories' or 'series'.")
 
+    # Flatten nested lists (LLM sometimes nests values in dicts/lists)
+    if isinstance(categories, dict):
+        categories = list(categories.keys())
+    categories = [str(c) for c in categories]
+
+    if len(categories) < 2:
+        raise ValueError(f"Chart needs at least 2 categories, got {len(categories)}.")
+
     # CategoryChartData holds the data table that Office reads to draw the chart
     chart_data = CategoryChartData()
-    chart_data.categories = [str(c) for c in categories]   # category axis labels
+    chart_data.categories = categories
 
     for series in series_list:
         name = series.get("name", "Series")
         values = series.get("values", [])
 
         # Coerce all values to float — non-numeric values become 0 to avoid crashes
-        safe_values = []
+        safe_values: list[float] = []
         for v in values:
             try:
                 safe_values.append(float(v))
             except (TypeError, ValueError):
-                safe_values.append(0.0)   # replace bad data with zero
+                safe_values.append(0.0)
+
+        # Pad or trim values to match category count
+        while len(safe_values) < len(categories):
+            safe_values.append(0.0)
+        safe_values = safe_values[: len(categories)]
 
         chart_data.add_series(name, safe_values)
 
@@ -183,8 +198,13 @@ def _style_chart(chart, chart_type_str: str, series_list: list[dict]) -> None:
         chart_type_str: Used for type-specific tweaks (e.g. bar gap width).
         series_list: The raw series list from the blueprint (used to check count).
     """
+    # Chart title is already shown via the slide title text box — hide it
+    try:
+        chart.has_title = False
+    except Exception:
+        pass
+
     # Show the legend only when there are multiple data series
-    # (a single series doesn't need a legend — the title already identifies it)
     chart.has_legend = len(series_list) > 1
     if chart.has_legend:
         chart.legend.position = XL_LEGEND_POSITION.BOTTOM   # put legend below the chart

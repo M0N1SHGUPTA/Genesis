@@ -1,0 +1,27 @@
+# Virtual environment
+env/
+venv/
+.venv/
+
+# Environment variables (API keys)
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Outputs (generated files)
+outputs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

@@ -249,6 +249,11 @@ class Renderer:
         title = data.get("title", "")
         subtitle = data.get("subtitle", "")
 
+        # Hard cap: cover subtitle must be max 20 words — never dump exec summary here
+        words = subtitle.split()
+        if len(words) > 20:
+            subtitle = " ".join(words[:20]) + "…"
+
         # Attempt to fill the template's built-in title/subtitle placeholders
         filled = self._fill_placeholders(slide, title=title, subtitle=subtitle)
 

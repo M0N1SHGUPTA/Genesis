@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ':*)",
+      "Bash(python -m pip show python-pptx)",
+      "Bash(python -c \"from pptx.util import Inches; print\\('pptx OK'\\)\")",
+      "Bash(ls *.py venv* .venv*)",
+      "Read(//c/Users/2006m/AppData/Local/Programs/Python/Python314/Lib/site-packages//**)"
+    ]
+  }
+}

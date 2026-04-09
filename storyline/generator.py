@@ -28,6 +28,47 @@ from storyline.prompts import (
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Module-level text helpers (used by fallback blueprint builder)
+# ---------------------------------------------------------------------------
+
+def _first_words(text: str, n: int) -> str:
+    """Return the first n words of text, appending '…' if trimmed."""
+    words = text.split()
+    if len(words) <= n:
+        return text.strip()
+    return " ".join(words[:n]) + "…"
+
+
+def _extract_bullets(text: str, max_bullets: int = 6, max_words: int = 15) -> list[str]:
+    """Split a block of text into concise bullet-sized strings.
+
+    Tries sentence boundaries first; falls back to word-count chunks.
+    Each returned string is at most max_words words.
+    """
+    if not text:
+        return []
+    # Split on sentence-ending punctuation followed by whitespace
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    bullets: list[str] = []
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+        words = sent.split()
+        if len(words) <= max_words:
+            bullets.append(sent)
+        else:
+            # Long sentence: break into max_words chunks
+            for start in range(0, len(words), max_words):
+                chunk = " ".join(words[start : start + max_words])
+                if chunk:
+                    bullets.append(chunk)
+        if len(bullets) >= max_bullets:
+            break
+    return bullets[:max_bullets]
+
 # Load .env from the project root (wherever main.py is run from)
 load_dotenv()
 
@@ -36,9 +77,9 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 MODEL = "llama-3.3-70b-versatile"
 MAX_RETRIES = 3
-# Rough character limit before we switch to the condensed summary prompt.
-# llama-3.3-70b-versatile has a 128k token context; ~400k chars is a safe cap.
-FULL_PROMPT_CHAR_LIMIT = 80_000
+# Free Groq tier allows ~12k TPM; ~1 token ≈ 4 chars → 12000 tokens ≈ 48000 chars.
+# Use condensed summary prompt for anything larger to avoid 413 errors.
+FULL_PROMPT_CHAR_LIMIT = 24_000
 MIN_SLIDES = 10
 MAX_SLIDES = 15
 
@@ -100,14 +141,20 @@ class StorylineGenerator:
 
         last_error = ""
         raw_response = ""
+        # Build a condensed fallback prompt in case the full prompt is too large
+        condensed_prompt = build_summary_prompt(parsed, self.target_slides)
 
         for attempt in range(1, MAX_RETRIES + 1):
             logger.info("LLM attempt %d/%d …", attempt, MAX_RETRIES)
             try:
                 if attempt == 1:
                     raw_response = self._call_llm(prompt)
+                elif "413" in last_error or "too large" in last_error.lower() or "rate_limit" in last_error.lower():
+                    # Payload too large or rate limit — retry with condensed prompt
+                    logger.info("Retrying with condensed summary prompt …")
+                    raw_response = self._call_llm(condensed_prompt)
                 else:
-                    # On retry: send the correction prompt referencing the bad output
+                    # JSON was malformed — send correction prompt referencing bad output
                     correction = build_correction_prompt(
                         raw_response, last_error, self.target_slides
                     )
@@ -175,7 +222,7 @@ class StorylineGenerator:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,   # low temperature for structured/deterministic output
-                max_tokens=8192,
+                max_tokens=3500,   # blueprint JSON needs ~2k tokens; 8192 blows the TPM limit
             )
             text = response.choices[0].message.content or ""
             if not text.strip():
@@ -260,59 +307,71 @@ class StorylineGenerator:
     # ------------------------------------------------------------------
 
     def _validate(self, blueprint: dict) -> None:
-        """Validate the blueprint dict against required schema constraints.
+        """Validate and auto-repair the blueprint dict.
+
+        Fixes common LLM omissions in-place instead of raising. Only raises
+        if the slides list is missing or empty (unrecoverable).
 
         Args:
             blueprint: The parsed blueprint dict.
 
         Raises:
-            ValueError: If any constraint is violated.
+            ValueError: If slides list is absent or empty.
         """
-        # Check top-level required keys
-        missing = _REQUIRED_KEYS - blueprint.keys()
-        if missing:
-            raise ValueError(f"Blueprint missing required keys: {missing}")
-
-        # Validate slide count
-        total = blueprint.get("total_slides", 0)
         slides = blueprint.get("slides", [])
-
         if not isinstance(slides, list) or len(slides) == 0:
             raise ValueError("Blueprint has no slides.")
 
-        if not (MIN_SLIDES <= total <= MAX_SLIDES):
-            raise ValueError(
-                f"total_slides={total} is outside the 10–15 range."
-            )
+        # Auto-repair top-level missing keys
+        if "presentation_title" not in blueprint:
+            blueprint["presentation_title"] = "Presentation"
+            logger.warning("Auto-repaired: missing presentation_title.")
 
-        if len(slides) != total:
-            # Tolerate minor discrepancy (LLM sometimes miscounts) — just fix it
-            logger.warning(
-                "total_slides=%d but found %d slide objects — correcting.",
-                total, len(slides),
-            )
-            blueprint["total_slides"] = len(slides)
-
-        # Validate each slide
+        # Fix missing / wrong slide_number on every slide
         for i, slide in enumerate(slides):
-            missing_slide_keys = _REQUIRED_SLIDE_KEYS - slide.keys()
-            if missing_slide_keys:
-                raise ValueError(
-                    f"Slide {i + 1} missing keys: {missing_slide_keys}"
-                )
+            if "slide_number" not in slide:
+                slide["slide_number"] = i + 1
+                logger.debug("Auto-repaired slide_number for slide index %d.", i)
+
+            # Fix invalid or missing type
             slide_type = slide.get("type", "")
             if slide_type not in _VALID_TYPES:
-                raise ValueError(
-                    f"Slide {i + 1} has invalid type: '{slide_type}'"
+                slide["type"] = "content"
+                logger.warning(
+                    "Slide %d had invalid type '%s' — set to 'content'.", i + 1, slide_type
                 )
 
-        # First slide must be cover
+        # Ensure first slide is cover
         if slides[0].get("type") != "cover":
-            raise ValueError("First slide must be type 'cover'.")
+            logger.warning("First slide is not 'cover' — injecting cover slide.")
+            slides.insert(0, {
+                "slide_number": 1,
+                "type": "cover",
+                "title": blueprint.get("presentation_title", "Presentation"),
+                "subtitle": "",
+            })
+            for i, s in enumerate(slides):
+                s["slide_number"] = i + 1
 
-        # Last slide must be thank_you
+        # Ensure last slide is thank_you
         if slides[-1].get("type") != "thank_you":
-            raise ValueError("Last slide must be type 'thank_you'.")
+            logger.warning("Last slide is not 'thank_you' — appending.")
+            slides.append({
+                "slide_number": len(slides) + 1,
+                "type": "thank_you",
+                "title": "Thank You",
+                "subtitle": "",
+            })
+
+        # Fix slide count
+        blueprint["total_slides"] = len(slides)
+
+        # Clamp to 10-15 range — log but don't fail
+        total = blueprint["total_slides"]
+        if not (MIN_SLIDES <= total <= MAX_SLIDES):
+            logger.warning(
+                "total_slides=%d is outside 10–15 range — proceeding anyway.", total
+            )
 
     # ------------------------------------------------------------------
     # Rule-based fallback generator
@@ -333,38 +392,51 @@ class StorylineGenerator:
         logger.info("Building rule-based fallback blueprint …")
         slides: list[dict] = []
 
-        # Slide 1: Cover
+        # Slide 1: Cover — subtitle is a single short sentence (max 20 words)
+        raw_subtitle = parsed.get("subtitle", "")
+        subtitle_words = raw_subtitle.split()
+        cover_subtitle = " ".join(subtitle_words[:20]) + ("…" if len(subtitle_words) > 20 else "")
         slides.append({
             "slide_number": 1,
             "type": "cover",
             "title": parsed.get("title", "Presentation"),
-            "subtitle": parsed.get("subtitle", ""),
+            "subtitle": cover_subtitle,
         })
 
         # Slide 2: Executive summary (if present)
         exec_sum = parsed.get("executive_summary", "")
         if exec_sum:
-            # Split into two rough halves for two_column layout
-            sentences = exec_sum.split(". ")
-            mid = max(1, len(sentences) // 2)
+            bullets = _extract_bullets(exec_sum, max_bullets=8, max_words=14)
+            # Ensure at least 2 bullets per side
+            if len(bullets) < 4:
+                bullets = bullets + [_first_words(exec_sum, 14)] * (4 - len(bullets))
+            mid = max(2, len(bullets) // 2)
             slides.append({
                 "slide_number": len(slides) + 1,
                 "type": "executive_summary",
                 "layout": "two_column",
                 "title": "Executive Summary",
                 "left": {
-                    "heading": "Overview",
-                    "points": [s.strip() + "." for s in sentences[:mid] if s.strip()][:3],
+                    "heading": "Key Findings",
+                    "points": bullets[:mid],
                 },
                 "right": {
-                    "heading": "Key Points",
-                    "points": [s.strip() + "." for s in sentences[mid:] if s.strip()][:3],
+                    "heading": "Implications",
+                    "points": bullets[mid : mid + 4] or bullets[:4],
                 },
             })
 
-        # One content slide per section
+        # Slide 3: Agenda — list all section headings
         sections = parsed.get("sections", [])
-        layout_cycle = ["two_column", "single_focus", "icon_list", "two_column", "single_focus"]
+        if sections:
+            slides.append({
+                "slide_number": len(slides) + 1,
+                "type": "agenda",
+                "title": "Agenda",
+                "points": [sec["heading"] for sec in sections[:12]],
+            })
+
+        layout_cycle = ["three_cards", "two_column", "key_stats", "icon_list", "timeline", "two_column", "single_focus"]
 
         for idx, sec in enumerate(sections):
             if len(slides) >= MAX_SLIDES - 2:
@@ -382,40 +454,118 @@ class StorylineGenerator:
                 if len(slides) >= MAX_SLIDES - 2:
                     break
 
-            # Gather bullets from all subsections
+            # Gather bullets from all subsections (with 15-word cap each)
             all_bullets: list[str] = []
             for sub in sec.get("subsections", []):
-                all_bullets.extend(sub.get("bullets", []))
+                for b in sub.get("bullets", []):
+                    all_bullets.append(_first_words(b, 15))
                 for para in sub.get("paragraphs", []):
-                    # Turn paragraphs into short bullets
-                    if len(para) < 120:
-                        all_bullets.append(para)
+                    all_bullets.extend(_extract_bullets(para, max_bullets=2, max_words=15))
+
+            # Fallback: derive bullets from section-level content text
+            if not all_bullets and sec.get("content"):
+                all_bullets = _extract_bullets(sec["content"], max_bullets=6, max_words=15)
+
+            # Last resort: use subsection headings as bullets
+            if not all_bullets:
+                all_bullets = [
+                    _first_words(sub["heading"], 15)
+                    for sub in sec.get("subsections", [])
+                    if sub.get("heading")
+                ][:6] or [sec["heading"]]
 
             layout = layout_cycle[idx % len(layout_cycle)]
 
-            if layout == "two_column":
-                mid = max(1, len(all_bullets) // 2)
+            # Build slide according to layout type
+            if layout == "three_cards":
+                # Pick 3 subsections or split bullets into 3 groups
+                subs = sec.get("subsections", [])
+                if len(subs) >= 3:
+                    cards = [
+                        {
+                            "number": str(j + 1).zfill(2),
+                            "heading": _first_words(subs[j]["heading"], 5),
+                            "points": ([_first_words(b, 15) for b in subs[j].get("bullets", [])]
+                                       or _extract_bullets(subs[j].get("paragraphs", [""])[0] if subs[j].get("paragraphs") else "", 3, 15)
+                                       or [_first_words(subs[j]["heading"], 15)]),
+                        }
+                        for j in range(3)
+                    ]
+                else:
+                    chunk = max(1, len(all_bullets) // 3)
+                    cards = [
+                        {
+                            "number": str(j + 1).zfill(2),
+                            "heading": (
+                                _first_words(all_bullets[j * chunk], 5)
+                                if all_bullets and j * chunk < len(all_bullets)
+                                else f"Point {j + 1}"
+                            ),
+                            "points": all_bullets[j * chunk:(j + 1) * chunk][:4] or ["See document for details."],
+                        }
+                        for j in range(3)
+                    ]
                 slide: dict = {
+                    "slide_number": len(slides) + 1,
+                    "type": "content",
+                    "layout": "three_cards",
+                    "title": sec["heading"],
+                    "cards": cards,
+                }
+
+            elif layout in ("two_column", "key_stats") and all_bullets:
+                mid = max(1, len(all_bullets) // 2)
+                slide = {
                     "slide_number": len(slides) + 1,
                     "type": "content",
                     "layout": "two_column",
                     "title": sec["heading"],
                     "left": {
                         "heading": "Overview",
-                        "points": all_bullets[:mid][:6],
+                        "points": all_bullets[:mid][:4],
                     },
                     "right": {
                         "heading": "Details",
-                        "points": all_bullets[mid : mid + 6],
+                        "points": all_bullets[mid : mid + 4] or all_bullets[:4],
                     },
                 }
+
+            elif layout == "icon_list":
+                subs = sec.get("subsections", [])[:4]
+                items = [
+                    {
+                        "number": str(j + 1).zfill(2),
+                        "heading": _first_words(sub["heading"], 6),
+                        "description": (
+                            _first_words(sub.get("bullets", [""])[0], 20)
+                            if sub.get("bullets")
+                            else _first_words(sub.get("paragraphs", [""])[0], 20)
+                            if sub.get("paragraphs")
+                            else sec["heading"]
+                        ),
+                    }
+                    for j, sub in enumerate(subs)
+                ]
+                if not items:
+                    items = [
+                        {"number": str(j + 1).zfill(2), "heading": _first_words(b, 6), "description": b}
+                        for j, b in enumerate(all_bullets[:4])
+                    ]
+                slide = {
+                    "slide_number": len(slides) + 1,
+                    "type": "content",
+                    "layout": "icon_list",
+                    "title": sec["heading"],
+                    "items": items or [{"number": "01", "heading": sec["heading"], "description": sec.get("content", "")[:100]}],
+                }
+
             else:
                 slide = {
                     "slide_number": len(slides) + 1,
                     "type": "content",
                     "layout": "single_focus",
                     "title": sec["heading"],
-                    "focus": sec.get("content", sec["heading"])[:80],
+                    "focus": _first_words(sec.get("content", sec["heading"]), 18),
                     "points": all_bullets[:6],
                 }
 
@@ -429,17 +579,19 @@ class StorylineGenerator:
                         nd = num_data[0]
                         categories = list(nd["values"].keys())
                         values = list(nd["values"].values())
-                        slides.append({
-                            "slide_number": len(slides) + 1,
-                            "type": "chart",
-                            "title": nd.get("context", "Data"),
-                            "chart_type": "bar",
-                            "data": {
-                                "categories": [str(c) for c in categories],
-                                "series": [{"name": nd.get("context", "Values"), "values": values}],
-                            },
-                            "caption": "",
-                        })
+                        # Skip chart if fewer than 2 data points — single bar is meaningless
+                        if len(categories) >= 2:
+                            slides.append({
+                                "slide_number": len(slides) + 1,
+                                "type": "chart",
+                                "title": nd.get("context", "Data"),
+                                "chart_type": "bar",
+                                "data": {
+                                    "categories": [str(c) for c in categories],
+                                    "series": [{"name": nd.get("context", "Values"), "values": values}],
+                                },
+                                "caption": "",
+                            })
                     break
 
             # Check for table opportunity

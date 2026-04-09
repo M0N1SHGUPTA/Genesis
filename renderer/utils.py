@@ -296,7 +296,7 @@ def add_slide_title(
         left=config.MARGIN_LEFT,
         top=config.MARGIN_TOP,
         width=config.CONTENT_WIDTH,
-        height=Inches(0.9),              # fixed height — keeps content area consistent
+        height=Inches(1.2),              # tall enough for 2-line titles at 32pt
         font_size=config.TITLE_FONT_SIZE,
         bold=True,
         color=color,

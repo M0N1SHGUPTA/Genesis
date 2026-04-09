@@ -134,6 +134,9 @@ def _add_styled_table(
         num_rows, num_cols,
         left, top, width, height,
     )
+    # Strip the inherited template table style so our manual cell colors take effect.
+    # Without this, the template's dark table style overrides every fill we set.
+    _clear_table_style(table_shape)
     table = table_shape.table
 
     # Distribute available width evenly across all columns
@@ -176,6 +179,29 @@ def _add_styled_table(
             )
 
 
+def _clear_table_style(table_shape) -> None:
+    """Null out the table's inherited theme style.
+
+    When a table is added to a slide that uses a template, python-pptx copies
+    the template's default table style (often dark) into the table's tblPr.
+    Setting the styleId to the null GUID disables that style so our manual
+    per-cell fills are not overridden.
+
+    Args:
+        table_shape: The GraphicFrame shape containing the table.
+    """
+    try:
+        tbl = table_shape.table._tbl
+        tblPr = tbl.find(qn("a:tblPr"))
+        if tblPr is not None:
+            style_id_el = tblPr.find(qn("a:tableStyleId"))
+            if style_id_el is not None:
+                # Null GUID = "No Table Style" — disables all inherited formatting
+                style_id_el.text = "{00000000-0000-0000-0000-000000000000}"
+    except Exception as exc:
+        logger.debug("Could not clear table style: %s", exc)
+
+
 def _style_cell(
     cell,
     font_size: Pt,
@@ -198,19 +224,25 @@ def _style_cell(
         align: Paragraph text alignment.
     """
     # --- Background fill via XML ---
-    # We add an <a:solidFill><a:srgbClr val="RRGGBB"/></a:solidFill> element
-    # inside the table cell properties element <a:tcPr>.
+    # We find-or-create <a:tcPr>, strip any existing fill elements (solidFill,
+    # noFill, gradFill) that may have been inherited, then insert our own
+    # solidFill. Stripping first prevents multiple competing fill elements.
     try:
-        tc = cell._tc                          # the underlying <a:tc> XML element
-        tcPr = tc.get_or_add_tcPr()            # get or create <a:tcPr> (cell properties)
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
 
-        # Build the solid fill XML structure
+        # Remove any fill elements that may already exist (inherited from style)
+        for fill_tag in ("a:solidFill", "a:noFill", "a:gradFill", "a:pattFill", "a:blipFill"):
+            existing = tcPr.find(qn(fill_tag))
+            if existing is not None:
+                tcPr.remove(existing)
+
+        # Insert our solid fill
         solidFill = etree.SubElement(tcPr, qn("a:solidFill"))
         srgbClr = etree.SubElement(solidFill, qn("a:srgbClr"))
-
-        # Convert RGBColor to uppercase 6-digit hex string (e.g. "E83F33")
+        # RGBColor is a (R, G, B) tuple in this version of python-pptx
         hex_color = "{:02X}{:02X}{:02X}".format(
-            bg_color.red, bg_color.green, bg_color.blue
+            bg_color[0], bg_color[1], bg_color[2]
         )
         srgbClr.set("val", hex_color)
     except Exception as exc:

@@ -156,12 +156,12 @@ def validate_args(args: argparse.Namespace) -> None:
 
 
 def run_pipeline(args: argparse.Namespace) -> None:
-    """Execute the three-stage conversion pipeline.
+    """Execute the conversion pipeline.
 
     Stages:
-        1. Parse   — markdown file → structured JSON (sections, bullets, tables, numbers)
-        2. Storyline — structured JSON → slide blueprint JSON (via Groq LLM)
-        3. Render  — slide blueprint + template → output .pptx file
+        1. Parse     — markdown file → structured JSON
+        2. Agents    — structured JSON → slide blueprint JSON (3 focused LLM agents)
+        3. Render    — slide blueprint + template → output .pptx file
 
     Imports are deferred to inside this function so that argument validation
     (which runs before this) never fails due to a missing dependency.
@@ -174,11 +174,11 @@ def run_pipeline(args: argparse.Namespace) -> None:
     # Extracts: title, subtitle, executive summary, sections, subsections,
     # bullets, paragraphs, tables, and numerical data blocks.
     # ------------------------------------------------------------------
-    logger.info("Stage 1/3 — Parsing markdown: %s", args.md)
+    logger.info("Stage 1 — Parsing markdown: %s", args.md)
     from parser.md_parser import MarkdownParser  # noqa: PLC0415
 
     parser_obj = MarkdownParser()
-    parsed = parser_obj.parse(args.md)  # returns a dict matching the schema in CLAUDE.md
+    parsed = parser_obj.parse(args.md)
     logger.info(
         "Parsed %d section(s), %d table(s), %d numerical block(s)",
         parsed.get("total_sections", 0),
@@ -187,16 +187,18 @@ def run_pipeline(args: argparse.Namespace) -> None:
     )
 
     # ------------------------------------------------------------------
-    # Stage 2 — Generate slide blueprint via LLM
-    # The LLM decides: slide count, layout per slide, which data becomes
-    # a chart, content trimming, and narrative flow.
+    # Stage 2 — Multi-agent intelligence pipeline
+    #
+    # Agent 1 (ContentExtractor)  — key insights + visual candidates
+    # Agent 2 (StorylinePlanner)  — slide sequence + layout per slide
+    # Agent 3 (ContentTransformer)— fills all content fields
+    # Python  (DesignEnforcer)    — rule-based quality validation
     # ------------------------------------------------------------------
-    logger.info("Stage 2/3 — Generating slide storyline via LLM …")
-    from storyline.generator import StorylineGenerator  # noqa: PLC0415
+    logger.info("Stage 2 — Running multi-agent pipeline …")
+    from agents.pipeline import AgentPipeline  # noqa: PLC0415
 
-    # target_slides=None lets the LLM decide freely within the 10-15 range
-    generator = StorylineGenerator(target_slides=args.slides)
-    blueprint = generator.generate(parsed)  # returns slide blueprint dict
+    pipeline = AgentPipeline(target_slides=args.slides)
+    blueprint = pipeline.generate(parsed)
     logger.info(
         "Blueprint ready: %d slide(s) planned",
         blueprint.get("total_slides", "?"),
@@ -204,14 +206,12 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     # ------------------------------------------------------------------
     # Stage 3 — Render blueprint + template → .pptx
-    # The renderer auto-selects a template from templates_dir when
-    # template_path is None, otherwise uses the explicitly provided file.
     # ------------------------------------------------------------------
-    logger.info("Stage 3/3 — Rendering presentation …")
+    logger.info("Stage 3 — Rendering presentation …")
     from renderer.engine import Renderer  # noqa: PLC0415
 
     renderer = Renderer(
-        template_path=args.template,    # None → auto-select from templates_dir
+        template_path=args.template,
         templates_dir=args.templates_dir,
     )
     renderer.render(blueprint, parsed, args.output)

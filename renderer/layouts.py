@@ -277,13 +277,25 @@ def _two_column(slide, data: dict) -> None:
         accent = slide.shapes.add_shape(1, left, CT, col_width, Inches(0.07))
         style_shape(accent, fill_color=config.COLOR_PRIMARY, line_color=None)
 
-        # Heading inside card
+        # Icon glyph next to the heading — derived from heading text.
+        # Guide rule: "Icons are rarely used" → add icons to all category layouts.
         heading = col.get("heading", "")
+        icon_name = col.get("icon") or icon_for_text(heading)
+        icon_size = Inches(0.35)
+        draw_icon_glyph(
+            slide, icon_name,
+            left=left + PAD, top=CT + Inches(0.16),
+            size=icon_size,
+        )
+
+        # Heading inside card (shifted right to make room for icon)
         if heading:
             add_textbox(
                 slide, _heading_truncate(heading, 8),
-                left=left + PAD, top=CT + Inches(0.12),
-                width=col_width - 2 * PAD, height=Inches(0.55),
+                left=left + PAD + icon_size + Inches(0.12),
+                top=CT + Inches(0.12),
+                width=col_width - 2 * PAD - icon_size - Inches(0.12),
+                height=Inches(0.55),
                 font_size=config.CARD_HEADING_SIZE, bold=True,
                 color=config.COLOR_TEXT_DARK,
                 font_name=config.TITLE_FONT,
@@ -416,26 +428,33 @@ def _key_stats(slide, data: dict) -> None:
         accent = slide.shapes.add_shape(1, left, stat_top, stat_width, Inches(0.07))
         style_shape(accent, fill_color=config.COLOR_PRIMARY, line_color=None)
 
-        # Big number — centered
+        # Vertically center the stat number + label within the card.
+        # Guide rule: "Numbers not visually dominant enough" + "Not distributed properly"
+        # Total content block = number (1.4") + gap (0.2") + label (0.6") = ~2.2"
+        content_block = Inches(2.2)
+        center_offset = (stat_height - Inches(0.07) - content_block) / 2  # subtract accent bar
+        num_top = stat_top + Inches(0.07) + center_offset
+
+        # Big number — centered and visually dominant (52pt bold)
         value = str(stat.get("value", ""))
         add_textbox(
             slide, value,
-            left=left + PAD, top=stat_top + Inches(0.5),
-            width=stat_width - 2 * PAD, height=Inches(1.3),
+            left=left + PAD, top=num_top,
+            width=stat_width - 2 * PAD, height=Inches(1.4),
             font_size=config.STAT_NUMBER_SIZE, bold=True,
             color=config.COLOR_PRIMARY,
             align=PP_ALIGN.CENTER,
             font_name=config.TITLE_FONT,
         )
 
-        # Label below number — truncated to keep it tight under the big number
+        # Label below number — uses secondary color for better readability
         label = _truncate(str(stat.get("label", "")), 5)
         add_textbox(
             slide, label,
-            left=left + PAD, top=stat_top + Inches(1.9),
+            left=left + PAD, top=num_top + Inches(1.6),
             width=stat_width - 2 * PAD, height=Inches(0.6),
             font_size=config.STAT_LABEL_SIZE,
-            color=config.COLOR_TEXT_MUTED,
+            color=config.COLOR_TEXT_SECONDARY,
             align=PP_ALIGN.CENTER,
         )
 
@@ -504,7 +523,7 @@ def _timeline(slide, data: dict) -> None:
             align=PP_ALIGN.CENTER,
         )
 
-        # Description below heading
+        # Description below heading — uses secondary color for better contrast
         desc = _truncate(step.get("description", ""), 15)
         add_textbox(
             slide, desc,
@@ -512,7 +531,7 @@ def _timeline(slide, data: dict) -> None:
             top=line_y + circle_r + Inches(0.68),
             width=step_width, height=Inches(1.8),
             font_size=Pt(11),
-            color=config.COLOR_TEXT_MUTED,
+            color=config.COLOR_TEXT_SECONDARY,
             align=PP_ALIGN.CENTER,
         )
 
@@ -568,7 +587,7 @@ def _process_flow(slide, data: dict) -> None:
             slide, desc,
             left=left + PAD, top=box_top + Inches(1.2),
             width=box_width - 2 * PAD, height=Inches(1.1),
-            font_size=Pt(11), color=config.COLOR_TEXT_MUTED,
+            font_size=Pt(11), color=config.COLOR_TEXT_SECONDARY,
             align=PP_ALIGN.CENTER,
         )
 
@@ -610,11 +629,21 @@ def _comparison(slide, data: dict) -> None:
 
         text_color = config.COLOR_TEXT_LIGHT
 
+        # Icon glyph in top-left corner (white on colored background)
         heading = col.get("heading", "")
+        icon_name = col.get("icon") or icon_for_text(heading)
+        icon_size = Inches(0.4)
+        draw_icon_glyph(
+            slide, icon_name,
+            left=left + PAD, top=CT + PAD,
+            size=icon_size,
+            fill=config.COLOR_TEXT_LIGHT,
+        )
+
         if heading:
             add_textbox(
                 slide, _heading_truncate(heading, 8),
-                left=left + PAD, top=CT + PAD,
+                left=left + PAD, top=CT + PAD + icon_size + Inches(0.08),
                 width=col_width - 2 * PAD, height=Inches(0.55),
                 font_size=config.CARD_HEADING_SIZE, bold=True,
                 color=text_color, align=PP_ALIGN.CENTER,
@@ -626,9 +655,9 @@ def _comparison(slide, data: dict) -> None:
             points = ["See document for details."]
         add_bullet_textbox(
             slide, [_truncate(p, 15) for p in points[:6]],
-            left=left + PAD, top=CT + PAD + Inches(0.65),
+            left=left + PAD, top=CT + PAD + icon_size + Inches(0.7),
             width=col_width - 2 * PAD,
-            height=col_height - PAD - Inches(0.75),
+            height=col_height - PAD - icon_size - Inches(0.8),
             font_size=config.BODY_FONT_SIZE, color=text_color,
         )
 
@@ -685,14 +714,14 @@ def _icon_list(slide, data: dict) -> None:
             font_name=config.TITLE_FONT,
         )
 
-        # Description below heading
+        # Description below heading — secondary color for readable contrast
         desc = _truncate(item.get("description", ""), 20)
         add_textbox(
             slide, desc,
             left=text_left, top=row_top + Inches(0.42),
             width=text_width, height=row_height - Inches(0.45),
             font_size=config.BODY_FONT_SIZE,
-            color=config.COLOR_TEXT_MUTED,
+            color=config.COLOR_TEXT_SECONDARY,
         )
 
         # Separator line (skip last row)
@@ -720,10 +749,19 @@ def _single_focus(slide, data: dict) -> None:
     points = data.get("points", [])
 
     if focus:
+        # Large accent icon beside the focus statement
+        icon_name = icon_for_text(focus)
+        icon_size = Inches(0.5)
+        draw_icon_glyph(
+            slide, icon_name,
+            left=ML, top=CT + Inches(0.05),
+            size=icon_size,
+        )
+
         add_textbox(
             slide, _truncate(focus, 20),
-            left=ML, top=CT,
-            width=CW, height=Inches(1.2),
+            left=ML + icon_size + Inches(0.15), top=CT,
+            width=CW - icon_size - Inches(0.15), height=Inches(1.2),
             font_size=Pt(22), bold=True,
             color=config.COLOR_PRIMARY,
             align=PP_ALIGN.LEFT,

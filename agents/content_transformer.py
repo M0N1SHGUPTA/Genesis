@@ -34,6 +34,13 @@ _SYSTEM = (
 
 _MAX_TOKENS = 5000  # richer bullets (5-6 per slide at ~25 words) need more room
 
+# If the full transform prompt exceeds this many characters, switch to
+# batched mode (3-4 slides per call). Conservative limit matching extractor.
+_CHUNK_CHAR_LIMIT = 20_000
+
+# Number of slides per batch when chunking
+_BATCH_SIZE = 4
+
 
 class ContentTransformer(BaseAgent):
     """Agent 3 — fills every slide's content fields from the plan + extracted data.
@@ -50,6 +57,9 @@ class ContentTransformer(BaseAgent):
         parsed: dict,
     ) -> dict:
         """Produce the final slide blueprint from the plan and extracted content.
+
+        For large slide plans, splits into batches of 3-4 slides per LLM call
+        to stay within Groq's token limits.
 
         Falls back to a rule-based transformer if the LLM fails.
 
@@ -69,11 +79,39 @@ class ContentTransformer(BaseAgent):
         per_slide_ctx = self._build_per_slide_context(plan, extracted)
         prompt = self._build_prompt(per_slide_ctx, extracted)
 
+        if len(prompt) <= _CHUNK_CHAR_LIMIT:
+            # Small enough — single call
+            return self._transform_single(prompt, extracted, plan, parsed)
+        else:
+            # Too large — batched approach
+            logger.info(
+                "ContentTransformer: prompt too large (%d chars > %d limit) — using batched transform.",
+                len(prompt), _CHUNK_CHAR_LIMIT,
+            )
+            return self._transform_batched(per_slide_ctx, extracted, plan, parsed)
+
+    def _transform_single(
+        self,
+        prompt: str,
+        extracted: dict,
+        plan: dict,
+        parsed: dict,
+    ) -> dict:
+        """Fill all slides in a single LLM call.
+
+        Args:
+            prompt:    Pre-built transform prompt.
+            extracted: extracted_content dict.
+            plan:      slide_plan dict (for rule-based fallback).
+            parsed:    original parsed dict (for rule-based fallback).
+
+        Returns:
+            Full blueprint dict.
+        """
         try:
             result = self._run_with_retry(prompt, _SYSTEM, max_tokens=_MAX_TOKENS)
             if not isinstance(result.get("slides"), list) or not result["slides"]:
                 raise ValueError("Transformer output missing 'slides'.")
-            # Ensure title field exists at top level
             if "presentation_title" not in result:
                 result["presentation_title"] = extracted.get("title", "Presentation")
             result["total_slides"] = len(result["slides"])
@@ -84,6 +122,124 @@ class ContentTransformer(BaseAgent):
         except Exception as exc:
             logger.warning("ContentTransformer failed: %s — using rule-based fallback.", exc)
             return self._rule_based_transform(plan, extracted, parsed)
+
+    def _transform_batched(
+        self,
+        per_slide_ctx: list[dict],
+        extracted: dict,
+        plan: dict,
+        parsed: dict,
+    ) -> dict:
+        """Fill slides in batches of _BATCH_SIZE to stay within token limits.
+
+        Each batch gets its own LLM call with only 3-4 slides' context.
+        Results are merged into a single blueprint.
+
+        Falls back to rule-based for any batch that fails.
+
+        Args:
+            per_slide_ctx: Full list of per-slide context dicts.
+            extracted:     extracted_content dict.
+            plan:          slide_plan dict (for rule-based fallback).
+            parsed:        original parsed dict (for rule-based fallback).
+
+        Returns:
+            Full blueprint dict.
+        """
+        all_slides: list[dict] = []
+
+        # Split per_slide_ctx into batches
+        batches = [
+            per_slide_ctx[i : i + _BATCH_SIZE]
+            for i in range(0, len(per_slide_ctx), _BATCH_SIZE)
+        ]
+
+        for batch_idx, batch in enumerate(batches):
+            logger.info(
+                "ContentTransformer: batch %d/%d — slides %d-%d",
+                batch_idx + 1, len(batches),
+                batch[0].get("slide_number", "?"),
+                batch[-1].get("slide_number", "?"),
+            )
+
+            prompt = self._build_prompt(batch, extracted)
+            try:
+                result = self._run_with_retry(prompt, _SYSTEM, max_tokens=_MAX_TOKENS)
+                batch_slides = result.get("slides", [])
+                if isinstance(batch_slides, list) and batch_slides:
+                    all_slides.extend(batch_slides)
+                    continue
+            except Exception as exc:
+                logger.warning(
+                    "Batch %d failed: %s — using rule-based for these slides.",
+                    batch_idx + 1, exc,
+                )
+
+            # Rule-based fallback for this batch
+            for ctx in batch:
+                try:
+                    slide = self._build_slide_from_ctx(ctx, extracted, parsed)
+                    all_slides.append(slide)
+                except Exception:
+                    all_slides.append({
+                        "slide_number": ctx.get("slide_number", 0),
+                        "type": ctx.get("type", "content"),
+                        "layout": ctx.get("layout", "single_focus"),
+                        "title": ctx.get("title", "Slide"),
+                        "focus": "",
+                        "points": [],
+                    })
+
+        # Renumber slides sequentially
+        for i, slide in enumerate(all_slides):
+            slide["slide_number"] = i + 1
+
+        blueprint = {
+            "presentation_title": extracted.get("title", parsed.get("title", "Presentation")),
+            "total_slides": len(all_slides),
+            "slides": all_slides,
+        }
+
+        logger.info(
+            "ContentTransformer (batched): %d slides filled.", len(all_slides)
+        )
+        return blueprint
+
+    def _build_slide_from_ctx(
+        self,
+        ctx: dict,
+        extracted: dict,
+        parsed: dict,
+    ) -> dict:
+        """Build a single slide dict from its context using rule-based logic.
+
+        This is a lightweight wrapper that maps a per-slide context dict
+        to the same output as _build_slide, for use in batched fallback.
+
+        Args:
+            ctx:       Per-slide context dict.
+            extracted: Full extracted_content dict.
+            parsed:    Original parsed dict.
+
+        Returns:
+            Single slide dict.
+        """
+        # Index key_sections by heading for lookup
+        section_index: dict[str, dict] = {
+            s["heading"]: s
+            for s in extracted.get("key_sections", [])
+        }
+
+        slide_type = ctx.get("type", "content")
+        layout = ctx.get("layout", "single_focus")
+        num = ctx.get("slide_number", 1)
+        source = ctx.get("title", "")
+        sec = section_index.get(source, {})
+
+        return self._build_slide(
+            slide_type, layout, num, sec, source,
+            extracted, parsed,
+        )
 
     # ------------------------------------------------------------------
     # Per-slide context builder

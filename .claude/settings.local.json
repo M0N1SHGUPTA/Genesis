@@ -19,7 +19,8 @@
       "Bash(tasklist //FI \"IMAGENAME eq soffice.exe\")",
       "Bash(taskkill //F //IM soffice.exe)",
       "Bash(taskkill //F //IM soffice.bin)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(powershell -c \"\\(Get-Item test_cases/UAE.md\\).Length; \\(Get-Item test_cases/accenture.md\\).Length\")"
     ]
   }
 }

@@ -276,6 +276,16 @@ def _style_cell(
             run.font.bold = bold
             run.font.color.rgb = text_color
 
+    # --- Vertical centering ---
+    # Sets anchor="ctr" on tcPr so text is vertically middle-aligned in the cell.
+    # This prevents text from sitting at the top of tall cells.
+    try:
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        tcPr.set("anchor", "ctr")
+    except Exception:
+        pass   # vertical alignment is cosmetic — safe to skip on failure
+
     # --- Cell inner padding ---
     # Sets marL/R/T/B (margin left/right/top/bottom) on the tcPr element
     try:

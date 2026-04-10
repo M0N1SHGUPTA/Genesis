@@ -118,6 +118,24 @@ def add_textbox(
     tf = txBox.text_frame
     tf.word_wrap = word_wrap   # prevents text from spilling outside the box boundary
 
+    # Text boxes without a fill (transparent background) should have zero
+    # internal margins so they don't waste space. Boxes WITH fill keep a
+    # small margin for readability inside the colored area.
+    # Guide rule: "No margins within text boxes which do not have any fill color"
+    try:
+        txBody = txBox._element.find(qn("p:txBody"))
+        if txBody is None:
+            txBody = txBox._element.find(qn("a:txBody"))
+        if txBody is not None:
+            bodyPr = txBody.find(qn("a:bodyPr"))
+            if bodyPr is not None:
+                bodyPr.set("lIns", "0")
+                bodyPr.set("rIns", "0")
+                bodyPr.set("tIns", "0")
+                bodyPr.set("bIns", "0")
+    except Exception:
+        pass  # margin zeroing is cosmetic — safe to skip
+
     # python-pptx creates one empty paragraph by default — use it for the first run
     p = tf.paragraphs[0]
     p.alignment = align
@@ -334,6 +352,22 @@ def add_slide_title(
         align=PP_ALIGN.LEFT,             # titles are always left-aligned
         font_name=config.TITLE_FONT,     # serif for editorial feel
     )
+
+    # Thin red accent line below the title — gives viewers a clear visual
+    # anchor so they immediately know where the title ends and content begins.
+    # Guide rule: "Viewer doesn't know where to look first" → add hierarchy cues.
+    from pptx.enum.shapes import MSO_SHAPE
+    try:
+        accent = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            config.MARGIN_LEFT,
+            config.MARGIN_TOP + Inches(1.25),
+            Inches(1.5),
+            Inches(0.04),
+        )
+        style_shape(accent, fill_color=config.COLOR_PRIMARY, line_color=None)
+    except Exception:
+        pass  # accent line is cosmetic — never fatal
 
 
 # ---------------------------------------------------------------------------

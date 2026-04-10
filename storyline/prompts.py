@@ -103,7 +103,17 @@ Total slides must be between 10 and 15.
 - Use "three_cards" for slides with exactly 3 concepts or categories
 - Use "two_column" for comparison or before/after content
 
-### Charts:
+### VISUAL LAYOUT PREFERENCE (CRITICAL):
+- PREFER infographic/visual layouts (icon_list, three_cards, key_stats, timeline, process_flow) over text-heavy layouts (single_focus, two_column)
+- Only use single_focus or two_column when content truly does not fit any visual pattern
+- When a section lists 3–5 items with descriptions, use icon_list or three_cards — NOT bullet points in single_focus
+- When content describes a sequence, phases, or steps, use timeline or process_flow
+- When data has success/failure, pros/cons, or two contrasting sides, use comparison layout
+- Slides should feel like DESIGNED slides, not documents — every slide needs visual structure (cards, icons, charts), not just text
+
+### Charts (IMPORTANT — prefer charts over number-bullets):
+- When content lists numerical outcomes (revenue, headcount, percentages, growth rates), ALWAYS create a chart slide rather than putting numbers in bullet points
+- When comparing numerical success vs failure counts, use a bar chart
 - Only create "chart" slides when the parsed content has actual numerical_data
 - "categories" MUST be a list of strings: ["2020", "2021", "2022"]
 - "series" MUST be: [{{"name": "label", "values": [10, 25, 47]}}]
@@ -334,7 +344,15 @@ Use key_stats when slide has specific numbers/percentages.
 Use three_cards when slide has exactly 3 concepts.
 Use two_column for comparisons or before/after.
 
+## VISUAL LAYOUT PREFERENCE (CRITICAL)
+PREFER infographic layouts (icon_list, three_cards, key_stats, timeline, process_flow) over text-heavy ones (single_focus, two_column).
+When 3-5 items have descriptions → use icon_list or three_cards.
+When content describes steps/phases → use timeline or process_flow.
+When data has pros/cons or contrasts → use comparison.
+Slides must feel DESIGNED, not like documents.
+
 ## CHART RULES
+- When content has numerical outcomes (revenue, headcount, growth), ALWAYS create a chart slide instead of number-bullets
 - Only create chart slides when DATA entries appear above
 - categories: list of strings, values: list of numbers (not strings)
 

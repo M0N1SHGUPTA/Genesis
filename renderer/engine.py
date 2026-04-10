@@ -270,6 +270,7 @@ class Renderer:
                 font_size=Pt(40), bold=True,
                 color=config.COLOR_TEXT_LIGHT,
                 align=PP_ALIGN.CENTER,
+                font_name=config.TITLE_FONT,
             )
             if subtitle:
                 add_textbox(
@@ -286,50 +287,66 @@ class Renderer:
     def _render_divider(self, prs: Presentation, data: dict) -> None:
         """Render a section divider slide.
 
-        Tries the template's Divider layout first. If its placeholders can't be
-        filled, draws a full-bleed dark background with large white title text.
+        Full-bleed red background with a large serif section number on the
+        left, the section title below it, and a subtle subtitle underneath.
+        This replaces the old dark-bg + dash approach to match the target
+        deck's rhythm of "every new section gets a red page".
         """
-        layout = get_layout_by_name(prs, "divider")
+        # Always use Blank layout — we draw everything ourselves
+        layout = get_blank_layout(prs)
         slide = prs.slides.add_slide(layout)
+        self._clear_placeholders(slide)
 
         title = data.get("title", "")
         subtitle = data.get("subtitle", "")
+        section_num = data.get("section_number", "")
 
-        filled = self._fill_placeholders(slide, title=title, subtitle=subtitle)
+        # Full-bleed red background
+        bg = slide.shapes.add_shape(
+            1, 0, 0, config.SLIDE_WIDTH, config.SLIDE_HEIGHT,
+        )
+        style_shape(bg, fill_color=config.COLOR_PRIMARY, line_color=None)
 
-        if not filled:
-            self._clear_placeholders(slide)
-            # Full-slide dark background to create visual contrast from content slides
-            bg = slide.shapes.add_shape(
-                1, 0, 0, config.SLIDE_WIDTH, config.SLIDE_HEIGHT
-            )
-            style_shape(bg, fill_color=config.COLOR_DIVIDER_BG, line_color=None)
-
-            # Red accent dash as a decorative element above the title
+        # Large section number — huge serif outline on the left
+        if section_num:
             add_textbox(
-                slide, "—",
-                left=config.MARGIN_LEFT, top=Inches(2.0),
-                width=Inches(1.0), height=Inches(0.6),
-                font_size=Pt(48), bold=True,
-                color=config.COLOR_PRIMARY,
-            )
-            # Large white section title
-            add_textbox(
-                slide, title,
-                left=config.MARGIN_LEFT, top=Inches(2.7),
-                width=config.CONTENT_WIDTH, height=Inches(1.5),
-                font_size=Pt(36), bold=True,
+                slide, section_num,
+                left=config.MARGIN_LEFT, top=Inches(1.4),
+                width=Inches(3.0), height=Inches(1.6),
+                font_size=Pt(80), bold=True,
                 color=config.COLOR_TEXT_LIGHT,
+                font_name=config.TITLE_FONT,
             )
-            if subtitle:
-                # Muted subtitle below the title
-                add_textbox(
-                    slide, subtitle,
-                    left=config.MARGIN_LEFT, top=Inches(4.3),
-                    width=config.CONTENT_WIDTH, height=Inches(0.6),
-                    font_size=config.SUBTITLE_FONT_SIZE,
-                    color=config.COLOR_TEXT_MUTED,
-                )
+
+        # Thin white divider line under the number
+        line_top = Inches(3.1) if section_num else Inches(2.2)
+        line = slide.shapes.add_shape(
+            1, config.MARGIN_LEFT, line_top,
+            Inches(1.2), Inches(0.035),
+        )
+        style_shape(line, fill_color=config.COLOR_TEXT_LIGHT, line_color=None)
+
+        # Section title — large, white, serif
+        title_top = line_top + Inches(0.25)
+        add_textbox(
+            slide, title,
+            left=config.MARGIN_LEFT, top=title_top,
+            width=config.CONTENT_WIDTH, height=Inches(1.5),
+            font_size=Pt(36), bold=True,
+            color=config.COLOR_TEXT_LIGHT,
+            font_name=config.TITLE_FONT,
+        )
+
+        # Subtitle — light pink for readability on red
+        if subtitle:
+            from pptx.dml.color import RGBColor
+            add_textbox(
+                slide, subtitle,
+                left=config.MARGIN_LEFT, top=title_top + Inches(1.6),
+                width=config.CONTENT_WIDTH, height=Inches(0.8),
+                font_size=config.SUBTITLE_FONT_SIZE,
+                color=RGBColor(0xFF, 0xE5, 0xE1),
+            )
 
     def _render_thank_you(self, prs: Presentation, data: dict) -> None:
         """Render the closing Thank You slide.
@@ -356,6 +373,7 @@ class Renderer:
                 font_size=Pt(48), bold=True,
                 color=config.COLOR_TEXT_LIGHT,
                 align=PP_ALIGN.CENTER,
+                font_name=config.TITLE_FONT,
             )
             if subtitle:
                 add_textbox(

@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 # These layouts can be swapped when consecutive duplicates are found
 _LAYOUT_ROTATION = [
-    "single_focus", "two_column", "three_cards",
-    "icon_list", "key_stats", "timeline",
+    "single_focus", "two_col_sidebar", "three_cards",
+    "icon_list", "key_stats", "timeline", "two_column",
 ]
 
 # Slide types that have a "layout" field subject to variety rules
@@ -330,7 +330,7 @@ class DesignEnforcer:
             slide.setdefault("focus", slide.get("title", ""))
             slide.setdefault("points", [_PH])
 
-        elif layout in ("two_column", "comparison"):
+        elif layout in ("two_column", "two_col_sidebar", "comparison"):
             slide.setdefault("left", {"heading": "Overview", "points": [_PH]})
             slide.setdefault("right", {"heading": "Details", "points": [_PH]})
 

@@ -53,6 +53,16 @@ SECTION_NUMBER_SIZE = Pt(64)    # large decorative number on section divider sli
 SLIDE_NUM_SIZE = Pt(10)         # slide number in the bottom-right corner
 
 # ---------------------------------------------------------------------------
+# Font families
+# TITLE_FONT is a serif for editorial feel; body stays as the template's
+# default sans. Both are universally available fallbacks — higher-quality
+# faces like "Playfair Display" are not guaranteed on the host, so we use
+# Georgia which ships with Windows, macOS, and most Linux distros.
+# ---------------------------------------------------------------------------
+TITLE_FONT = "Georgia"          # serif face applied to titles and card headings
+BODY_FONT = None                # None → inherit the template's theme body font
+
+# ---------------------------------------------------------------------------
 # Theme colors (Caspr / red-accent template palette)
 #
 # These are FALLBACK defaults used when the template's theme XML cannot be read.

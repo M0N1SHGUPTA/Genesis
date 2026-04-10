@@ -10,7 +10,16 @@
       "Bash(python main.py --md test_cases/accenture.md --template templates/Template_Accenture.pptx --output outputs/fixed.pptx --debug)",
       "Bash(python main.py --md test_cases/accenture.md --template \"templates/Template_Accenture Tech Acquisition Analysis.pptx\" --output outputs/fixed.pptx)",
       "Bash(python:*)",
-      "Bash(PYTHONIOENCODING=utf-8 GROQ_API_KEY= python main.py --md test_cases/accenture.md --template \"templates/Template_Accenture Tech Acquisition Analysis.pptx\" --output outputs/richer.pptx --slides 13)"
+      "Bash(PYTHONIOENCODING=utf-8 GROQ_API_KEY= python main.py --md test_cases/accenture.md --template \"templates/Template_Accenture Tech Acquisition Analysis.pptx\" --output outputs/richer.pptx --slides 13)",
+      "Bash(mkdir:*)",
+      "Bash(pip install:*)",
+      "Read(//c/Program Files/LibreOffice/program/**)",
+      "Read(//c/Program Files \\(x86\\)/LibreOffice/program/**)",
+      "Bash(\"C:/Program Files/LibreOffice/program/soffice.exe\" --headless --convert-to pdf --outdir \"C:/Users/2006m/AppData/Local/Temp/ours_imgs\" \"C:/Users/2006m/OneDrive/Desktop/Genesis/outputs/richer.pptx\")",
+      "Bash(tasklist //FI \"IMAGENAME eq soffice.exe\")",
+      "Bash(taskkill //F //IM soffice.exe)",
+      "Bash(taskkill //F //IM soffice.bin)",
+      "Bash(wc:*)"
     ]
   }
 }

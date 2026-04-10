@@ -33,14 +33,16 @@ _MAX_TOKENS = 1000  # slide_plan is compact; generous budget still fits easily
 # Available layout options shown to the planner
 _LAYOUT_REFERENCE = """
 LAYOUT OPTIONS (for "content" and "executive_summary" type slides):
-  "two_column"    — left column + right column (good for comparisons, before/after)
-  "three_cards"   — three equal cards in a row (good for exactly 3 concepts)
-  "key_stats"     — 2–4 big KPI numbers with labels
-  "timeline"      — numbered steps on a horizontal line
-  "process_flow"  — boxes with arrows (good for sequential processes)
-  "comparison"    — two high-contrast colored columns
-  "icon_list"     — numbered circles + heading + description rows (3–4 items)
-  "single_focus"  — one key message + supporting bullets
+  "two_col_sidebar"          — red sidebar with title + content cards on right (DEFAULT for content with 4+ insights)
+  "two_column"               — left column + right column (good for comparisons, before/after)
+  "three_cards"              — three equal cards in a row (good for exactly 3 concepts)
+  "key_stats"                — 2–4 big KPI numbers with labels
+  "timeline"                 — numbered steps on a horizontal line
+  "process_flow"             — boxes with arrows (good for sequential processes)
+  "comparison"               — two high-contrast colored columns
+  "icon_list"                — icon circles + heading + description rows (3–4 items)
+  "single_focus"             — one key message + supporting bullets
+  "exec_summary_with_photo"  — red sidebar + 2x2 icon-card grid (ONLY for executive_summary)
 """
 
 
@@ -144,7 +146,7 @@ SLIDE COUNT RULE:
 
 MANDATORY STRUCTURE:
 1. Slide 1: type "cover"
-2. Slide 2: type "executive_summary", layout "two_column" — ONLY if has_executive_summary is true
+2. Slide 2: type "executive_summary", layout "exec_summary_with_photo" — ONLY if has_executive_summary is true
 3. Slide 3: type "agenda"
 4. Middle slides: mix of "section_divider", "content", "chart", "table"
 5. Second-to-last: type "conclusion", layout "single_focus"
@@ -155,7 +157,8 @@ LAYOUT ASSIGNMENT RULES:
 - "table" type slide for any section with visual_type "table"
 - "timeline" or "process_flow" layout for sections with visual_type "timeline" or "process_flow"
 - "three_cards" layout for sections with exactly 3 insights
-- "two_column" for sections with 4+ insights or visual_type "comparison"
+- "two_col_sidebar" as the DEFAULT for content slides with 4+ insights (replaces plain two_column)
+- "two_column" only when visual_type is "comparison" or for before/after comparisons
 - "key_stats" if has_global_stats is true — use it once for a dedicated KPI slide
 - "icon_list" for sections that list 3–4 named items or recommendations
 - "single_focus" for conclusion and short sections
@@ -168,10 +171,10 @@ OUTPUT a JSON object — no explanation, no markdown:
   "total_slides": 12,
   "slides": [
     {{"slide_number": 1, "type": "cover"}},
-    {{"slide_number": 2, "type": "executive_summary", "layout": "two_column"}},
+    {{"slide_number": 2, "type": "executive_summary", "layout": "exec_summary_with_photo"}},
     {{"slide_number": 3, "type": "agenda"}},
     {{"slide_number": 4, "type": "section_divider", "source_section": "Section Name"}},
-    {{"slide_number": 5, "type": "content", "layout": "three_cards", "source_section": "Section Name"}},
+    {{"slide_number": 5, "type": "content", "layout": "two_col_sidebar", "source_section": "Section Name"}},
     {{"slide_number": 6, "type": "chart", "source_section": "Section Name"}},
     {{"slide_number": 7, "type": "content", "layout": "key_stats", "source_section": null}},
     {{"slide_number": 8, "type": "conclusion", "layout": "single_focus"}},
@@ -253,7 +256,7 @@ Section-sourced slides (content, chart, table, section_divider) MUST have: sourc
             slides.append({
                 "slide_number": 2,
                 "type": "executive_summary",
-                "layout": "two_column",
+                "layout": "exec_summary_with_photo",
             })
 
         # 3. Agenda
@@ -269,8 +272,8 @@ Section-sourced slides (content, chart, table, section_divider) MUST have: sourc
             })
 
         _LAYOUT_CYCLE = [
-            "three_cards", "two_column", "icon_list",
-            "timeline", "single_focus", "two_column",
+            "two_col_sidebar", "three_cards", "icon_list",
+            "two_col_sidebar", "timeline", "single_focus",
         ]
         layout_idx = 0
 

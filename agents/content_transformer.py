@@ -129,7 +129,7 @@ class ContentTransformer(BaseAgent):
                 bullets = extracted.get("executive_summary_bullets", [])
                 mid = max(1, len(bullets) // 2)
                 ctx["title"] = "Executive Summary"
-                ctx["layout"] = "two_column"
+                ctx["layout"] = "exec_summary_with_photo"
                 ctx["left_points"] = bullets[:mid]
                 ctx["right_points"] = bullets[mid : mid + 4] or bullets[:4]
 
@@ -143,6 +143,11 @@ class ContentTransformer(BaseAgent):
                 sec = section_index.get(source or "", {})
                 ctx["title"] = source or ""
                 ctx["subtitle"] = sec.get("key_insights", [""])[0] if sec else ""
+                # Assign a sequential section number for divider visuals
+                divider_count = sum(
+                    1 for s in per_slide if s.get("type") == "section_divider"
+                )
+                ctx["section_number"] = str(divider_count + 1).zfill(2)
 
             elif slide_type == "chart":
                 sec = section_index.get(source or "", {})
@@ -225,13 +230,17 @@ SLIDE SCHEMAS:
 
 COVER: {{"slide_number": 1, "type": "cover", "title": "...", "subtitle": "ONE sentence max 20 words"}}
 
-EXECUTIVE_SUMMARY: {{"slide_number": N, "type": "executive_summary", "layout": "two_column", "title": "Executive Summary",
+EXECUTIVE_SUMMARY: {{"slide_number": N, "type": "executive_summary", "layout": "exec_summary_with_photo", "title": "Executive Summary",
   "left": {{"heading": "Key Findings", "points": ["bullet with specific fact", ...]}},
   "right": {{"heading": "Implications", "points": ["bullet with specific fact", ...]}}}}
 
 AGENDA: {{"slide_number": N, "type": "agenda", "title": "Agenda", "points": ["Section heading 1", ...]}}
 
-SECTION_DIVIDER: {{"slide_number": N, "type": "section_divider", "title": "Section Name", "subtitle": "one specific insight from that section"}}
+SECTION_DIVIDER: {{"slide_number": N, "type": "section_divider", "title": "Section Name", "subtitle": "one specific insight from that section", "section_number": "01"}}
+
+CONTENT/two_col_sidebar: {{"slide_number": N, "type": "content", "layout": "two_col_sidebar", "title": "...",
+  "left": {{"heading": "specific label", "points": ["fact-based bullet"]}},
+  "right": {{"heading": "specific label", "points": ["fact-based bullet"]}}}}
 
 CONTENT/two_column: {{"slide_number": N, "type": "content", "layout": "two_column", "title": "...",
   "left": {{"heading": "specific label", "points": ["fact-based bullet"]}},
@@ -331,6 +340,7 @@ STRICT CONTENT RULES — these are non-negotiable:
         }
 
         slides: list[dict] = []
+        divider_counter = 0
 
         for planned in plan.get("slides", []):
             slide_type = planned.get("type", "content")
@@ -344,6 +354,10 @@ STRICT CONTENT RULES — these are non-negotiable:
                     slide_type, layout, num, sec, source,
                     extracted, parsed,
                 )
+                # Add sequential section number for divider slides
+                if slide_type == "section_divider":
+                    divider_counter += 1
+                    slide["section_number"] = str(divider_counter).zfill(2)
                 slides.append(slide)
             except Exception as exc:
                 logger.warning("Rule-based slide %d failed: %s — using placeholder.", num, exc)
@@ -431,7 +445,7 @@ STRICT CONTENT RULES — these are non-negotiable:
             return {
                 "slide_number": num,
                 "type": "executive_summary",
-                "layout": "two_column",
+                "layout": "exec_summary_with_photo",
                 "title": "Executive Summary",
                 "left": {
                     "heading": "Key Findings",
@@ -559,7 +573,7 @@ STRICT CONTENT RULES — these are non-negotiable:
                 "cards": cards,
             }
 
-        if layout in ("two_column", "comparison"):
+        if layout in ("two_column", "two_col_sidebar", "comparison"):
             topped = _ensure(6, insights)
             comp = sec.get("comparison")
             if comp:

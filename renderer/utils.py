@@ -87,6 +87,7 @@ def add_textbox(
     align: PP_ALIGN = PP_ALIGN.LEFT,
     word_wrap: bool = True,
     italic: bool = False,
+    font_name: Optional[str] = None,
 ) -> object:
     """Add a single-run styled text box to a slide.
 
@@ -106,6 +107,8 @@ def add_textbox(
         align: Paragraph alignment (LEFT, CENTER, RIGHT).
         word_wrap: If True, text wraps inside the box instead of overflowing.
         italic: Whether the text should be italic.
+        font_name: Optional font family name. When None, the theme's default
+                   font is used. Pass config.TITLE_FONT for serif titles.
 
     Returns:
         The created TextBox shape object.
@@ -129,6 +132,8 @@ def add_textbox(
     font.bold = bold
     font.italic = italic
     font.color.rgb = color
+    if font_name:
+        font.name = font_name   # override theme font (e.g. serif on titles)
 
     return txBox
 
@@ -284,6 +289,7 @@ def add_slide_title(
 
     All content slides use this to ensure consistent title positioning.
     The title occupies the area from MARGIN_TOP down to CONTENT_TOP.
+    Titles are always rendered in the project serif face (config.TITLE_FONT).
 
     Args:
         slide: The python-pptx slide object.
@@ -301,6 +307,7 @@ def add_slide_title(
         bold=True,
         color=color,
         align=PP_ALIGN.LEFT,             # titles are always left-aligned
+        font_name=config.TITLE_FONT,     # serif for editorial feel
     )
 
 

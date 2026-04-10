@@ -30,6 +30,13 @@ from renderer.utils import (
     add_slide_title,
     style_shape,
 )
+from renderer.visuals import (
+    draw_card_with_divider,
+    draw_icon_glyph,
+    draw_numbered_badge,
+    draw_red_left_sidebar,
+    icon_for_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +79,14 @@ def render_content_slide(slide, slide_data: dict, slide_num: int) -> None:
     title = slide_data.get("title", "")
     slide_type = slide_data.get("type", "content")
 
-    # Title is added first so all layout functions can assume it's already there
-    add_slide_title(slide, title)
+    # Layouts that paint their own title/sidebar and must NOT have the
+    # standard top title bar layered on top of them.
+    _FULL_BLEED_LAYOUTS = {"exec_summary_with_photo", "two_col_sidebar"}
+    needs_standard_title = layout not in _FULL_BLEED_LAYOUTS
+
+    if needs_standard_title:
+        # Title is added first so all layout functions can assume it's already there
+        add_slide_title(slide, title)
 
     # Agenda gets its own dedicated renderer regardless of layout field
     if slide_type == "agenda":
@@ -87,14 +100,16 @@ def render_content_slide(slide, slide_data: dict, slide_num: int) -> None:
 
     # Map layout name strings to their render functions
     dispatch = {
-        "two_column":   _two_column,
-        "three_cards":  _three_cards,
-        "key_stats":    _key_stats,
-        "timeline":     _timeline,
-        "process_flow": _process_flow,
-        "comparison":   _comparison,
-        "icon_list":    _icon_list,
-        "single_focus": _single_focus,
+        "two_column":               _two_column,
+        "three_cards":              _three_cards,
+        "key_stats":                _key_stats,
+        "timeline":                 _timeline,
+        "process_flow":             _process_flow,
+        "comparison":               _comparison,
+        "icon_list":                _icon_list,
+        "single_focus":             _single_focus,
+        "two_col_sidebar":          _two_col_sidebar,
+        "exec_summary_with_photo":  _exec_summary_with_photo,
     }
 
     fn = dispatch.get(layout, _single_focus)
@@ -241,6 +256,7 @@ def _two_column(slide, data: dict) -> None:
                 width=col_width - 2 * PAD, height=Inches(0.55),
                 font_size=config.CARD_HEADING_SIZE, bold=True,
                 color=config.COLOR_TEXT_DARK,
+                font_name=config.TITLE_FONT,
             )
 
         # Bullet points below heading
@@ -296,6 +312,20 @@ def _three_cards(slide, data: dict) -> None:
             width=card_width - 2 * PAD, height=Inches(0.55),
             font_size=Pt(28), bold=True,
             color=config.COLOR_PRIMARY,
+            font_name=config.TITLE_FONT,
+        )
+
+        # Small red icon in the top-right corner (heuristic from heading text).
+        # Renders as a filled MSO_SHAPE; no external image required.
+        icon_name = card_data.get("icon") or icon_for_text(
+            card_data.get("heading", "")
+        )
+        icon_size = Inches(0.4)
+        draw_icon_glyph(
+            slide, icon_name,
+            left=left + card_width - PAD - icon_size,
+            top=CT + Inches(0.18),
+            size=icon_size,
         )
 
         # Card heading below number
@@ -307,6 +337,7 @@ def _three_cards(slide, data: dict) -> None:
                 width=card_width - 2 * PAD, height=Inches(0.55),
                 font_size=config.CARD_HEADING_SIZE, bold=True,
                 color=config.COLOR_TEXT_DARK,
+                font_name=config.TITLE_FONT,
             )
 
         # Bullet points
@@ -364,6 +395,7 @@ def _key_stats(slide, data: dict) -> None:
             font_size=config.STAT_NUMBER_SIZE, bold=True,
             color=config.COLOR_PRIMARY,
             align=PP_ALIGN.CENTER,
+            font_name=config.TITLE_FONT,
         )
 
         # Label below number
@@ -556,6 +588,7 @@ def _comparison(slide, data: dict) -> None:
                 width=col_width - 2 * PAD, height=Inches(0.55),
                 font_size=config.CARD_HEADING_SIZE, bold=True,
                 color=text_color, align=PP_ALIGN.CENTER,
+                font_name=config.TITLE_FONT,
             )
 
         points = col.get("points", [])
@@ -594,18 +627,21 @@ def _icon_list(slide, data: dict) -> None:
         row_top = CT + i * (row_height + CGAP / 2)
         circle_top = row_top + (row_height - circle_size) / 2
 
-        # Red circle on left
+        # Red circle background for contrast
         circle = slide.shapes.add_shape(9, ML, circle_top, circle_size, circle_size)
         style_shape(circle, fill_color=config.COLOR_PRIMARY, line_color=None)
 
-        # White number inside circle
-        number = item.get("number", str(i + 1).zfill(2))
-        add_textbox(
-            slide, number,
-            left=ML, top=circle_top,
-            width=circle_size, height=circle_size,
-            font_size=Pt(14), bold=True, color=config.COLOR_TEXT_LIGHT,
-            align=PP_ALIGN.CENTER,
+        # White icon glyph inside the circle — the glyph is a filled MSO_SHAPE
+        # sized smaller than the circle so the red ring reads as a bezel.
+        icon_name = item.get("icon") or icon_for_text(item.get("heading", ""))
+        glyph_size = Inches(0.3)
+        glyph_left = ML + (circle_size - glyph_size) / 2
+        glyph_top = circle_top + (circle_size - glyph_size) / 2
+        draw_icon_glyph(
+            slide, icon_name,
+            left=glyph_left, top=glyph_top,
+            size=glyph_size,
+            fill=config.COLOR_TEXT_LIGHT,
         )
 
         # Heading to the right
@@ -616,6 +652,7 @@ def _icon_list(slide, data: dict) -> None:
             width=text_width, height=Inches(0.4),
             font_size=config.CARD_HEADING_SIZE, bold=True,
             color=config.COLOR_TEXT_DARK,
+            font_name=config.TITLE_FONT,
         )
 
         # Description below heading
@@ -660,6 +697,7 @@ def _single_focus(slide, data: dict) -> None:
             font_size=Pt(22), bold=True,
             color=config.COLOR_PRIMARY,
             align=PP_ALIGN.LEFT,
+            font_name=config.TITLE_FONT,
         )
 
         # Thin red accent line separator
@@ -681,3 +719,253 @@ def _single_focus(slide, data: dict) -> None:
             font_size=config.BODY_FONT_SIZE,
             color=config.COLOR_TEXT_DARK,
         )
+
+
+# ---------------------------------------------------------------------------
+# Layout: two_col_sidebar
+# Red left sidebar (~32%) with section number + title. Content on the right
+# is drawn from left.points / right.points as two stacked card sections,
+# or from a flat points[] list split in half. This is the default layout
+# for content-heavy sections and replaces the plain two_column for most
+# middle slides. Accepts the same blueprint data shape as two_column.
+# ---------------------------------------------------------------------------
+
+def _two_col_sidebar(slide, data: dict) -> None:
+    """Render a two-column layout with a red left sidebar.
+
+    The sidebar holds the section title + optional section number.
+    The right area shows two stacked content groups (from left/right or
+    flat points), each rendered as a cream card with a serif heading
+    and bullet points.
+
+    render_content_slide() skips add_slide_title for this layout
+    because the sidebar paints its own title.
+
+    Blueprint keys accepted (same as two_column):
+        left.heading, left.points, right.heading, right.points
+    OR:
+        points (list[str]) — auto-split into two halves
+    """
+    title = data.get("title", "")
+    section_num = data.get("section_number")  # optional "01", "02", …
+
+    # --- Left sidebar (reuse the visuals.py primitive) ---
+    sidebar_right_edge = draw_red_left_sidebar(
+        slide, title, section_number=section_num,
+    )
+
+    # --- Right content area ---
+    right_left = sidebar_right_edge + Inches(0.4)
+    right_top = Inches(0.5)
+    right_width = config.SLIDE_WIDTH - right_left - Inches(0.5)
+    right_bottom = config.SLIDE_HEIGHT - Inches(0.5)
+
+    # Collect the two content groups
+    left_col = data.get("left", {})
+    right_col = data.get("right", {})
+    if not isinstance(left_col, dict):
+        left_col = {}
+    if not isinstance(right_col, dict):
+        right_col = {}
+
+    # Fallback: if left/right are empty, split flat "points" list
+    if not left_col.get("points") and not right_col.get("points"):
+        flat = data.get("points", [])
+        mid = max(1, len(flat) // 2)
+        left_col = {"heading": "Overview", "points": flat[:mid]}
+        right_col = {"heading": "Details", "points": flat[mid:]}
+
+    groups = []
+    if left_col.get("points"):
+        groups.append(left_col)
+    if right_col.get("points"):
+        groups.append(right_col)
+    if not groups:
+        groups = [{"heading": "Overview", "points": ["See document for details."]}]
+
+    # Render each group as a stacked card
+    n = len(groups)
+    card_gap = Inches(0.3)
+    card_h = (right_bottom - right_top - (n - 1) * card_gap) / n
+
+    for i, grp in enumerate(groups):
+        card_top = right_top + i * (card_h + card_gap)
+        heading = grp.get("heading", "")
+        points = grp.get("points", [])
+        if not points:
+            points = ["See document for details."]
+
+        # Cream card background with red border
+        card = slide.shapes.add_shape(1, right_left, card_top, right_width, card_h)
+        style_shape(card, fill_color=config.COLOR_CARD_BG, line_color=config.COLOR_CARD_BORDER)
+
+        # Red accent stripe at top
+        accent = slide.shapes.add_shape(1, right_left, card_top, right_width, Inches(0.06))
+        style_shape(accent, fill_color=config.COLOR_PRIMARY, line_color=None)
+
+        cursor = card_top + Inches(0.14)
+
+        # Icon + heading row
+        if heading:
+            icon_name = icon_for_text(heading)
+            icon_sz = Inches(0.35)
+            draw_icon_glyph(
+                slide, icon_name,
+                left=right_left + PAD, top=cursor + Inches(0.02),
+                size=icon_sz,
+            )
+            add_textbox(
+                slide, _truncate(heading, 8),
+                left=right_left + PAD + icon_sz + Inches(0.15),
+                top=cursor,
+                width=right_width - 2 * PAD - icon_sz - Inches(0.15),
+                height=Inches(0.45),
+                font_size=config.CARD_HEADING_SIZE, bold=True,
+                color=config.COLOR_TEXT_DARK,
+                font_name=config.TITLE_FONT,
+            )
+            cursor += Inches(0.55)
+
+        # Bullet points fill the rest of the card
+        bullet_h = card_top + card_h - cursor - PAD
+        if bullet_h > Inches(0.3):
+            add_bullet_textbox(
+                slide, [_truncate(p, 18) for p in points[:6]],
+                left=right_left + PAD,
+                top=cursor,
+                width=right_width - 2 * PAD,
+                height=bullet_h,
+                font_size=config.BODY_FONT_SIZE,
+                color=config.COLOR_TEXT_DARK,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Layout: exec_summary_with_photo
+# A signature opening slide: a full-height red sidebar on the left holding
+# a rotated "EXECUTIVE SUMMARY" badge, and a 2x2 grid of icon cards on the
+# right pulling from the existing executive_summary schema (left.points +
+# right.points). No photo is embedded; the "photo" in the name refers to
+# the visual weight of the red sidebar matching the target deck.
+# ---------------------------------------------------------------------------
+
+def _exec_summary_with_photo(slide, data: dict) -> None:
+    """Render the signature executive summary layout.
+
+    Accepts either of the following blueprint shapes:
+      1. Native: {"items": [{"heading": ..., "description": ...}, ...]}
+      2. Legacy (from the executive_summary two_column schema):
+         {"left": {"points": [...]}, "right": {"points": [...]}}
+         — in which case the combined points are turned into 4 cards.
+
+    The layout DOES NOT call add_slide_title — it paints its own sidebar
+    title instead. render_content_slide() skips the normal title for this
+    layout via the _FULL_BLEED_LAYOUTS set.
+    """
+    title = data.get("title", "Executive Summary")
+
+    # --- Left sidebar: full-height red rectangle with rotated serif title ---
+    sidebar_w = Inches(4.2)
+    sidebar = slide.shapes.add_shape(
+        1,          # MSO_SHAPE.RECTANGLE
+        0, 0, sidebar_w, config.SLIDE_HEIGHT,
+    )
+    style_shape(sidebar, fill_color=config.COLOR_PRIMARY, line_color=None)
+
+    # Large centred "01" marker near the top of the sidebar (mirrors the
+    # numbered rhythm from the target deck's section dividers).
+    add_textbox(
+        slide, "01",
+        left=Inches(0.5), top=Inches(0.5),
+        width=Inches(3.2), height=Inches(1.0),
+        font_size=Pt(48), bold=True,
+        color=config.COLOR_TEXT_LIGHT,
+        font_name=config.TITLE_FONT,
+    )
+
+    # Thin white divider line under the 01
+    divider = slide.shapes.add_shape(1, Inches(0.5), Inches(1.55),
+                                     Inches(0.8), Inches(0.03))
+    style_shape(divider, fill_color=config.COLOR_TEXT_LIGHT, line_color=None)
+
+    # The main title — large, white, serif, left-aligned inside the sidebar
+    add_textbox(
+        slide, title.upper(),
+        left=Inches(0.5), top=Inches(1.9),
+        width=Inches(3.2), height=Inches(3.0),
+        font_size=Pt(40), bold=True,
+        color=config.COLOR_TEXT_LIGHT,
+        font_name=config.TITLE_FONT,
+    )
+
+    # Small eyebrow label at the bottom of the sidebar for balance
+    add_textbox(
+        slide, "KEY HIGHLIGHTS",
+        left=Inches(0.5), top=Inches(6.4),
+        width=Inches(3.2), height=Inches(0.4),
+        font_size=Pt(10), bold=True,
+        color=RGBColor_light_pink(),
+    )
+
+    # --- Right side: 2x2 grid of icon cards ---
+    # Collect card content — prefer explicit "items", otherwise harvest
+    # from left.points + right.points (the legacy two_column schema).
+    items = data.get("items") or []
+    if not items:
+        merged: list[str] = []
+        for side in ("left", "right"):
+            col = data.get(side, {})
+            if isinstance(col, dict):
+                merged.extend(col.get("points", []))
+        # Turn flat bullets into {heading, description} pairs
+        for p in merged[:4]:
+            words = p.split()
+            heading = " ".join(words[:4]).rstrip(".,;:")
+            items.append({"heading": heading, "description": p})
+
+    if not items:
+        return   # nothing to render on the right side
+
+    # Fill up to 4 cards; 2x2 grid
+    items = items[:4]
+    grid_left = sidebar_w + Inches(0.5)
+    grid_top = Inches(0.7)
+    grid_width = config.SLIDE_WIDTH - grid_left - Inches(0.5)
+    grid_height = config.SLIDE_HEIGHT - grid_top - Inches(0.6)
+
+    cols = 2
+    rows = 2 if len(items) > 2 else 1
+    cell_w = (grid_width - Inches(0.3)) / cols
+    cell_h = (grid_height - Inches(0.3)) / rows
+
+    for i, item in enumerate(items):
+        row = i // cols
+        col = i % cols
+        cx = grid_left + col * (cell_w + Inches(0.3))
+        cy = grid_top + row * (cell_h + Inches(0.3))
+
+        heading = item.get("heading", "")
+        description = item.get("description", "")
+        icon = item.get("icon") or icon_for_text(heading)
+
+        draw_card_with_divider(
+            slide,
+            left=cx, top=cy,
+            width=cell_w, height=cell_h,
+            heading=_truncate(heading, 6),
+            body=_truncate(description, 28),
+            icon_name=icon,
+            heading_size=Pt(15),
+            body_size=Pt(11),
+        )
+
+
+def RGBColor_light_pink():
+    """Return a light pink color used for muted eyebrow labels on red sidebars.
+
+    Wrapped as a function so the import line at the top of this module
+    does not need to import RGBColor (layouts.py otherwise never touches
+    colors directly).
+    """
+    from pptx.dml.color import RGBColor
+    return RGBColor(0xFF, 0xD5, 0xCE)

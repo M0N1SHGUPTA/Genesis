@@ -28,6 +28,7 @@ from renderer.utils import (
     get_layout_by_name,
     get_blank_layout,
     remove_template_slides,
+    strip_numeric_prefix,
     style_shape,
 )
 from renderer.layouts import render_content_slide   # handles all "content" slide types
@@ -297,7 +298,7 @@ class Renderer:
         slide = prs.slides.add_slide(layout)
         self._clear_placeholders(slide)
 
-        title = data.get("title", "")
+        title = strip_numeric_prefix(data.get("title", ""))
         subtitle = data.get("subtitle", "")
         section_num = data.get("section_number", "")
 

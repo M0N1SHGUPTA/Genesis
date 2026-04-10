@@ -242,6 +242,25 @@ CONTENT/two_col_sidebar: {{"slide_number": N, "type": "content", "layout": "two_
   "left": {{"heading": "specific label", "points": ["fact-based bullet"]}},
   "right": {{"heading": "specific label", "points": ["fact-based bullet"]}}}}
 
+CONTENT/six_cards: {{"slide_number": N, "type": "content", "layout": "six_cards", "title": "...",
+  "cards": [
+    {{"heading": "short label", "description": "one specific detail max 18 words"}},
+    {{"heading": "short label", "description": "one specific detail max 18 words"}},
+    {{"heading": "short label", "description": "one specific detail max 18 words"}},
+    {{"heading": "short label", "description": "one specific detail max 18 words"}},
+    {{"heading": "short label", "description": "one specific detail max 18 words"}},
+    {{"heading": "short label", "description": "one specific detail max 18 words"}}
+  ]}}
+
+CONTENT/five_cards_row: {{"slide_number": N, "type": "content", "layout": "five_cards_row", "title": "...",
+  "cards": [
+    {{"heading": "short label", "description": "one specific takeaway max 15 words"}},
+    {{"heading": "short label", "description": "one specific takeaway max 15 words"}},
+    {{"heading": "short label", "description": "one specific takeaway max 15 words"}},
+    {{"heading": "short label", "description": "one specific takeaway max 15 words"}},
+    {{"heading": "short label", "description": "one specific takeaway max 15 words"}}
+  ]}}
+
 CONTENT/two_column: {{"slide_number": N, "type": "content", "layout": "two_column", "title": "...",
   "left": {{"heading": "specific label", "points": ["fact-based bullet"]}},
   "right": {{"heading": "specific label", "points": ["fact-based bullet"]}}}}
@@ -281,9 +300,14 @@ TABLE: {{"slide_number": N, "type": "table", "title": "...",
   "table": {{"headers": ["Col1", "Col2"], "rows": [["val", "val"]]}},
   "caption": "optional one-sentence insight"}}
 
-CONCLUSION: {{"slide_number": N, "type": "conclusion", "layout": "single_focus", "title": "Key Takeaways",
-  "focus": "one sentence summarising the main strategic conclusion",
-  "points": ["specific takeaway 1", "specific takeaway 2", "specific takeaway 3", "specific takeaway 4"]}}
+CONCLUSION: {{"slide_number": N, "type": "conclusion", "layout": "five_cards_row", "title": "Key Takeaways",
+  "cards": [
+    {{"heading": "short label", "description": "specific takeaway with fact max 15 words"}},
+    {{"heading": "short label", "description": "specific takeaway with fact max 15 words"}},
+    {{"heading": "short label", "description": "specific takeaway with fact max 15 words"}},
+    {{"heading": "short label", "description": "specific takeaway with fact max 15 words"}},
+    {{"heading": "short label", "description": "specific takeaway with fact max 15 words"}}
+  ]}}
 
 THANK_YOU: {{"slide_number": N, "type": "thank_you", "title": "Thank You", "subtitle": "brief closing remark"}}
 
@@ -519,18 +543,31 @@ STRICT CONTENT RULES — these are non-negotiable:
                 if s.get("key_insights"):
                     pooled.append(s["key_insights"][0])
             pooled = [p for p in pooled if p][:6]
-            focus = (
-                extracted.get("executive_summary_bullets", [""])[0]
-                or (pooled[0] if pooled else "")
-                or "Key strategic takeaways from the analysis"
-            )
+            # Build five_cards_row cards from pooled insights
+            cards = []
+            for ins in pooled[:5]:
+                heading = _first_words(ins, 4).rstrip(".,;:")
+                cards.append({"heading": heading, "description": ins})
+            # Fallback if not enough insights
+            if not cards:
+                focus = (
+                    extracted.get("executive_summary_bullets", [""])[0]
+                    or "Key strategic takeaways from the analysis"
+                )
+                return {
+                    "slide_number": num,
+                    "type": "conclusion",
+                    "layout": "single_focus",
+                    "title": "Key Takeaways",
+                    "focus": focus,
+                    "points": pooled[:5] or insights[:5],
+                }
             return {
                 "slide_number": num,
                 "type": "conclusion",
-                "layout": "single_focus",
+                "layout": "five_cards_row",
                 "title": "Key Takeaways",
-                "focus": focus,
-                "points": pooled[:5] or insights[:5],
+                "cards": cards,
             }
 
         # Content slides — dispatch by layout
@@ -569,6 +606,34 @@ STRICT CONTENT RULES — these are non-negotiable:
                 "slide_number": num,
                 "type": "content",
                 "layout": "three_cards",
+                "title": title,
+                "cards": cards,
+            }
+
+        if layout == "six_cards":
+            topped = _ensure(6, insights)
+            cards = []
+            for i, ins in enumerate(topped[:6]):
+                heading = _first_words(ins, 4).rstrip(".,;:")
+                cards.append({"heading": heading, "description": ins})
+            return {
+                "slide_number": num,
+                "type": "content",
+                "layout": "six_cards",
+                "title": title,
+                "cards": cards,
+            }
+
+        if layout == "five_cards_row":
+            topped = _ensure(5, insights)
+            cards = []
+            for i, ins in enumerate(topped[:5]):
+                heading = _first_words(ins, 4).rstrip(".,;:")
+                cards.append({"heading": heading, "description": ins})
+            return {
+                "slide_number": num,
+                "type": "content",
+                "layout": "five_cards_row",
                 "title": title,
                 "cards": cards,
             }

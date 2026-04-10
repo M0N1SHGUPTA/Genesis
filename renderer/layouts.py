@@ -34,7 +34,9 @@ from renderer.visuals import (
     draw_card_with_divider,
     draw_icon_glyph,
     draw_numbered_badge,
+    draw_red_full_background,
     draw_red_left_sidebar,
+    draw_red_top_pill,
     icon_for_text,
 )
 
@@ -53,11 +55,37 @@ CGAP = config.CARD_GAP      # horizontal gap between side-by-side cards
 
 
 def _truncate(text: str, max_words: int) -> str:
-    """Trim text to max_words words, appending '…' if trimmed."""
+    """Trim text to max_words words, splitting on clause boundaries when possible.
+
+    Instead of blindly chopping at word N, this tries to find a natural break
+    (comma, semicolon, colon, em-dash) within the first max_words words.
+    Falls back to word-count truncation if no clause boundary exists.
+    """
     words = text.split()
     if len(words) <= max_words:
         return text
-    return " ".join(words[:max_words]) + "…"
+    # Try to find a clause boundary within the first max_words words
+    fragment = " ".join(words[:max_words])
+    for sep in (",", ";", ":", " –", " —", " -"):
+        idx = fragment.rfind(sep)
+        # Only accept if the split keeps at least 3 words of substance
+        if idx > 0 and len(fragment[:idx].split()) >= 3:
+            return fragment[:idx].rstrip(".,;: –—-")
+    return fragment + "…"
+
+
+def _heading_truncate(text: str, max_words: int = 6) -> str:
+    """Truncate text for a card/step heading and title-case the result.
+
+    Headings should be short, punchy, and title-cased. This runs
+    _truncate then applies title-casing for a polished look.
+    """
+    result = _truncate(text, max_words)
+    # Don't title-case if it's already an acronym-heavy string (e.g. "UAE AI GDP")
+    upper_count = sum(1 for w in result.split() if w.isupper() and len(w) > 1)
+    if upper_count > len(result.split()) / 2:
+        return result
+    return result.title()
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +109,7 @@ def render_content_slide(slide, slide_data: dict, slide_num: int) -> None:
 
     # Layouts that paint their own title/sidebar and must NOT have the
     # standard top title bar layered on top of them.
-    _FULL_BLEED_LAYOUTS = {"exec_summary_with_photo", "two_col_sidebar"}
+    _FULL_BLEED_LAYOUTS = {"exec_summary_with_photo", "two_col_sidebar", "five_cards_row"}
     needs_standard_title = layout not in _FULL_BLEED_LAYOUTS
 
     if needs_standard_title:
@@ -108,6 +136,8 @@ def render_content_slide(slide, slide_data: dict, slide_num: int) -> None:
         "comparison":               _comparison,
         "icon_list":                _icon_list,
         "single_focus":             _single_focus,
+        "six_cards":                _six_cards,
+        "five_cards_row":           _five_cards_row,
         "two_col_sidebar":          _two_col_sidebar,
         "exec_summary_with_photo":  _exec_summary_with_photo,
     }
@@ -251,7 +281,7 @@ def _two_column(slide, data: dict) -> None:
         heading = col.get("heading", "")
         if heading:
             add_textbox(
-                slide, _truncate(heading, 8),
+                slide, _heading_truncate(heading, 8),
                 left=left + PAD, top=CT + Inches(0.12),
                 width=col_width - 2 * PAD, height=Inches(0.55),
                 font_size=config.CARD_HEADING_SIZE, bold=True,
@@ -332,7 +362,7 @@ def _three_cards(slide, data: dict) -> None:
         heading = card_data.get("heading", "")
         if heading:
             add_textbox(
-                slide, _truncate(heading, 7),
+                slide, _heading_truncate(heading, 7),
                 left=left + PAD, top=CT + Inches(0.72),
                 width=card_width - 2 * PAD, height=Inches(0.55),
                 font_size=config.CARD_HEADING_SIZE, bold=True,
@@ -398,8 +428,8 @@ def _key_stats(slide, data: dict) -> None:
             font_name=config.TITLE_FONT,
         )
 
-        # Label below number
-        label = str(stat.get("label", ""))
+        # Label below number — truncated to keep it tight under the big number
+        label = _truncate(str(stat.get("label", "")), 5)
         add_textbox(
             slide, label,
             left=left + PAD, top=stat_top + Inches(1.9),
@@ -463,7 +493,7 @@ def _timeline(slide, data: dict) -> None:
         )
 
         # Heading below circle
-        heading = _truncate(step.get("heading", ""), 6)
+        heading = _heading_truncate(step.get("heading", ""), 6)
         add_textbox(
             slide, heading,
             left=ML + i * (step_width + CGAP),
@@ -524,7 +554,7 @@ def _process_flow(slide, data: dict) -> None:
             align=PP_ALIGN.CENTER,
         )
 
-        heading = _truncate(step.get("heading", ""), 6)
+        heading = _heading_truncate(step.get("heading", ""), 6)
         add_textbox(
             slide, heading,
             left=left + PAD, top=box_top + Inches(0.6),
@@ -583,7 +613,7 @@ def _comparison(slide, data: dict) -> None:
         heading = col.get("heading", "")
         if heading:
             add_textbox(
-                slide, _truncate(heading, 8),
+                slide, _heading_truncate(heading, 8),
                 left=left + PAD, top=CT + PAD,
                 width=col_width - 2 * PAD, height=Inches(0.55),
                 font_size=config.CARD_HEADING_SIZE, bold=True,
@@ -645,7 +675,7 @@ def _icon_list(slide, data: dict) -> None:
         )
 
         # Heading to the right
-        heading = _truncate(item.get("heading", ""), 8)
+        heading = _heading_truncate(item.get("heading", ""), 8)
         add_textbox(
             slide, heading,
             left=text_left, top=row_top,
@@ -718,6 +748,160 @@ def _single_focus(slide, data: dict) -> None:
             height=CH - (bullet_top - CT) - GAP,
             font_size=config.BODY_FONT_SIZE,
             color=config.COLOR_TEXT_DARK,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Layout: six_cards
+# A 3×2 grid of small icon-cards, each with heading + red divider + body.
+# Designed for sections with 5–6 insights that don't need deep detail per
+# card — an information-dense page that matches target page 3.
+# ---------------------------------------------------------------------------
+
+def _six_cards(slide, data: dict) -> None:
+    """Render a 3×2 grid of small icon cards.
+
+    Blueprint key expected:
+        cards  (list of {heading, points|description})  — 4–6 items
+    Falls back to deriving cards from left.points + right.points or flat points[].
+    """
+    # Collect cards from the various data shapes the blueprint might provide
+    cards = data.get("cards", [])
+
+    if not cards:
+        # Harvest from left/right columns or flat points
+        merged: list[str] = []
+        for side in ("left", "right"):
+            col = data.get(side, {})
+            if isinstance(col, dict):
+                merged.extend(col.get("points", []))
+        if not merged:
+            merged = data.get("points", [])
+        for p in merged[:6]:
+            words = p.split()
+            heading = " ".join(words[:4]).rstrip(".,;:")
+            cards.append({"heading": heading, "description": p})
+
+    if not cards:
+        _single_focus(slide, data)
+        return
+
+    cards = cards[:6]
+    # Pad to at least 4 for visual balance
+    while len(cards) < 4:
+        cards.append({"heading": "Details", "description": "See document for details."})
+
+    cols = 3
+    rows = 2 if len(cards) > 3 else 1
+    card_gap = Inches(0.25)
+    card_w = (CW - (cols - 1) * card_gap) / cols
+    card_h = (CH - GAP - (rows - 1) * card_gap) / rows
+
+    for i, card_data in enumerate(cards):
+        row = i // cols
+        col = i % cols
+        cx = ML + col * (card_w + card_gap)
+        cy = CT + row * (card_h + card_gap)
+
+        heading = card_data.get("heading", "")
+        # Support both "description" (single string) and "points" (list)
+        body = card_data.get("description", "")
+        if not body:
+            pts = card_data.get("points", [])
+            body = ". ".join(pts[:2]) if pts else ""
+
+        icon = card_data.get("icon") or icon_for_text(heading)
+
+        draw_card_with_divider(
+            slide,
+            left=cx, top=cy,
+            width=card_w, height=card_h,
+            heading=_heading_truncate(heading, 5),
+            body=_truncate(body, 22),
+            icon_name=icon,
+            heading_size=Pt(13),
+            body_size=Pt(10),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Layout: five_cards_row
+# Single horizontal row of 5 cards on a red full-bleed background.
+# Matches target pages 2 and 10. Used for recap/conclusion slides
+# where you want a punchy overview of 5 key items.
+# This is a full-bleed layout — it paints its own title via a red top
+# pill and skips add_slide_title in the dispatcher.
+# ---------------------------------------------------------------------------
+
+def _five_cards_row(slide, data: dict) -> None:
+    """Render a horizontal row of 4–5 white icon-cards on a red background.
+
+    Blueprint key expected:
+        cards  (list of {heading, points|description})  — 4–5 items
+    Also accepts: points (list[str]), or left/right column data.
+    """
+    title = data.get("title", "")
+
+    # Red full-bleed background
+    draw_red_full_background(slide)
+
+    # Red top pill with the title (white text on slightly darker red pill)
+    draw_red_top_pill(slide, title)
+
+    # Collect card content
+    cards = data.get("cards", [])
+
+    if not cards:
+        merged: list[str] = []
+        for side in ("left", "right"):
+            col = data.get(side, {})
+            if isinstance(col, dict):
+                merged.extend(col.get("points", []))
+        if not merged:
+            merged = data.get("points", [])
+        # Also pull from focus + points for conclusion slides
+        focus = data.get("focus", "")
+        if focus and focus not in merged:
+            merged.insert(0, focus)
+        for p in merged[:5]:
+            words = p.split()
+            heading = " ".join(words[:4]).rstrip(".,;:")
+            cards.append({"heading": heading, "description": p})
+
+    if not cards:
+        return
+
+    cards = cards[:5]
+    # Pad to at least 3 for visual balance
+    while len(cards) < 3:
+        cards.append({"heading": "Details", "description": "See document for details."})
+
+    n = len(cards)
+    card_gap = Inches(0.2)
+    top = Inches(1.6)
+    card_w = (CW - (n - 1) * card_gap) / n
+    card_h = config.SLIDE_HEIGHT - top - Inches(0.5)
+
+    for i, card_data in enumerate(cards):
+        cx = ML + i * (card_w + card_gap)
+
+        heading = card_data.get("heading", "")
+        body = card_data.get("description", "")
+        if not body:
+            pts = card_data.get("points", [])
+            body = ". ".join(pts[:2]) if pts else ""
+
+        icon = card_data.get("icon") or icon_for_text(heading)
+
+        draw_card_with_divider(
+            slide,
+            left=cx, top=top,
+            width=card_w, height=card_h,
+            heading=_heading_truncate(heading, 5),
+            body=_truncate(body, 20),
+            icon_name=icon,
+            heading_size=Pt(13),
+            body_size=Pt(10),
         )
 
 
@@ -815,7 +999,7 @@ def _two_col_sidebar(slide, data: dict) -> None:
                 size=icon_sz,
             )
             add_textbox(
-                slide, _truncate(heading, 8),
+                slide, _heading_truncate(heading, 8),
                 left=right_left + PAD + icon_sz + Inches(0.15),
                 top=cursor,
                 width=right_width - 2 * PAD - icon_sz - Inches(0.15),
@@ -952,7 +1136,7 @@ def _exec_summary_with_photo(slide, data: dict) -> None:
             slide,
             left=cx, top=cy,
             width=cell_w, height=cell_h,
-            heading=_truncate(heading, 6),
+            heading=_heading_truncate(heading, 6),
             body=_truncate(description, 28),
             icon_name=icon,
             heading_size=Pt(15),

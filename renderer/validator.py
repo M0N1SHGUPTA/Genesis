@@ -33,11 +33,17 @@ logger = logging.getLogger(__name__)
 # These layouts can be swapped when consecutive duplicates are found
 _LAYOUT_ROTATION = [
     "single_focus", "two_col_sidebar", "three_cards",
-    "icon_list", "key_stats", "timeline", "two_column",
+    "six_cards", "icon_list", "key_stats", "timeline",
+    "five_cards_row", "two_column",
 ]
 
 # Slide types that have a "layout" field subject to variety rules
 _CONTENT_TYPES = {"content", "executive_summary", "conclusion"}
+
+# "Heavy" layouts — visually dense, many shapes.  Two of these back-to-back
+# overwhelm the audience.  The intensity rule swaps the second to a lighter one.
+_HEAVY_LAYOUTS = {"six_cards", "five_cards_row", "three_cards", "key_stats"}
+_LIGHT_ALTERNATIVES = ["two_col_sidebar", "single_focus", "icon_list", "timeline"]
 
 
 class DesignEnforcer:
@@ -79,6 +85,7 @@ class DesignEnforcer:
                 self._fix_key_stats_count(slide)
 
             self._fix_layout_variety(blueprint["slides"])
+            self._fix_visual_intensity(blueprint["slides"])
             self._renumber(blueprint["slides"])
             blueprint["total_slides"] = len(blueprint["slides"])
 
@@ -314,6 +321,48 @@ class DesignEnforcer:
                         self._add_layout_placeholders(curr, candidate)
                         break
 
+    # ------------------------------------------------------------------
+    # Rule 12: No two consecutive "heavy" layouts
+    # ------------------------------------------------------------------
+
+    def _fix_visual_intensity(self, slides: list[dict]) -> None:
+        """Ensure visually dense layouts don't appear back-to-back.
+
+        When two consecutive content slides both use a "heavy" layout
+        (six_cards, five_cards_row, three_cards, key_stats), the second
+        is swapped to a lighter alternative for visual rhythm.
+
+        Args:
+            slides: The full slides list (mutated in-place).
+        """
+        for i in range(1, len(slides)):
+            curr = slides[i]
+            prev = slides[i - 1]
+
+            if curr.get("type") not in _CONTENT_TYPES:
+                continue
+            if prev.get("type") not in _CONTENT_TYPES:
+                continue
+
+            curr_layout = curr.get("layout", "")
+            prev_layout = prev.get("layout", "")
+
+            if curr_layout in _HEAVY_LAYOUTS and prev_layout in _HEAVY_LAYOUTS:
+                # Find a light alternative that differs from both neighbours
+                next_layout = ""
+                if i < len(slides) - 1:
+                    next_layout = slides[i + 1].get("layout", "")
+                for candidate in _LIGHT_ALTERNATIVES:
+                    if candidate != prev_layout and candidate != next_layout:
+                        logger.debug(
+                            "Validator: slide %s layout changed from '%s' to '%s' "
+                            "(consecutive heavy layouts).",
+                            curr.get("slide_number"), curr_layout, candidate,
+                        )
+                        curr["layout"] = candidate
+                        self._add_layout_placeholders(curr, candidate)
+                        break
+
     def _add_layout_placeholders(self, slide: dict, layout: str) -> None:
         """Add the minimum required content fields for a layout if they're absent.
 
@@ -349,6 +398,13 @@ class DesignEnforcer:
 
         elif layout == "icon_list":
             slide.setdefault("items", [{"number": "01", "heading": "Item 1", "description": _PH}])
+
+        elif layout in ("six_cards", "five_cards_row"):
+            if not slide.get("cards"):
+                slide["cards"] = [
+                    {"heading": f"Point {i+1}", "description": _PH}
+                    for i in range(5 if layout == "five_cards_row" else 6)
+                ]
 
     # ------------------------------------------------------------------
     # Rule 9: Sequential slide numbers

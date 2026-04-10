@@ -35,7 +35,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
 import config
-from renderer.utils import add_textbox, style_shape
+from renderer.utils import add_textbox, strip_numeric_prefix, style_shape
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,7 @@ def draw_red_left_sidebar(
         The Emu x-coordinate where the sidebar ends (useful as the left edge
         of whatever content should sit to its right).
     """
+    title = strip_numeric_prefix(title)
     sidebar_w = Emu(int(config.SLIDE_WIDTH * width_frac))
 
     # Full-height red rectangle

@@ -157,6 +157,11 @@ def _add_styled_table(
             align=PP_ALIGN.CENTER,                 # centred in header
         )
 
+    # --- Red accent line below header row ---
+    # A thin red bar spanning the table width sits just under the header
+    # for extra visual weight (matches target deck styling).
+    _add_header_accent(slide, left, top, width, table)
+
     # --- Data rows (row indices 1 through num_rows-1) ---
     for row_idx, row_data in enumerate(rows):
         # Alternate background: odd rows get light gray, even rows stay white
@@ -167,15 +172,21 @@ def _add_styled_table(
 
             # Use empty string for cells where the source row has fewer columns
             value = str(row_data[col_idx]) if col_idx < len(row_data) else ""
+            # Truncate long cell values to prevent overflow (max ~30 words)
+            words = value.split()
+            if len(words) > 30:
+                value = " ".join(words[:30]) + "…"
             cell.text = value
 
+            # First column acts as a row label — bold red text for emphasis
+            is_label_col = col_idx == 0
             _style_cell(
                 cell,
                 font_size=Pt(12),
-                bold=False,
-                text_color=config.COLOR_TEXT_DARK,
+                bold=is_label_col,
+                text_color=config.COLOR_PRIMARY if is_label_col else config.COLOR_TEXT_DARK,
                 bg_color=bg,
-                align=PP_ALIGN.LEFT,   # body data is left-aligned
+                align=PP_ALIGN.LEFT,
             )
 
 
@@ -251,6 +262,13 @@ def _style_cell(
     # --- Text formatting ---
     tf = cell.text_frame
     tf.word_wrap = True   # prevent text from overflowing into adjacent cells
+    # Disable auto-size so text stays at the specified size and wraps instead
+    # of shrinking to fit (which can make dense tables unreadable).
+    try:
+        from pptx.enum.text import MSO_AUTO_SIZE
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
     for para in tf.paragraphs:
         para.alignment = align
         for run in para.runs:
@@ -270,3 +288,33 @@ def _style_cell(
         tcPr.set("marB", str(int(margin)))
     except Exception:
         pass   # padding is cosmetic — safe to skip on failure
+
+
+def _add_header_accent(slide, left: int, top: int, width: int, table) -> None:
+    """Draw a thin red accent line just below the header row of a table.
+
+    This adds extra visual weight to the header/body boundary, matching
+    the target deck's table styling convention.
+
+    Args:
+        slide: python-pptx slide object.
+        left: Table left position (EMU).
+        top: Table top position (EMU).
+        width: Table width (EMU).
+        table: The python-pptx Table object.
+    """
+    from pptx.enum.shapes import MSO_SHAPE
+    from renderer.utils import style_shape
+
+    try:
+        # Get the header row height to position the accent line
+        header_h = table.rows[0].height
+        accent_top = top + header_h
+        accent = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            left, accent_top,
+            width, Inches(0.04),
+        )
+        style_shape(accent, fill_color=config.COLOR_PRIMARY, line_color=None)
+    except Exception:
+        pass   # accent line is cosmetic — never fatal

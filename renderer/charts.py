@@ -4,7 +4,9 @@ renderer/charts.py — Native python-pptx chart generation.
 Charts are embedded as real Office chart objects — they stay fully editable
 in PowerPoint, Google Slides, and LibreOffice. No images or screenshots.
 
-Supported chart types: bar (clustered column), pie, line with markers, area.
+Supported chart types: bar (clustered column or horizontal bar), pie,
+line with markers, area. Horizontal bars are auto-selected when categories
+are text labels and there is only one data series.
 """
 
 from __future__ import annotations
@@ -25,7 +27,8 @@ logger = logging.getLogger(__name__)
 # Map the blueprint's string chart type → python-pptx XL_CHART_TYPE enum value.
 # XL_CHART_TYPE values correspond directly to Office chart type identifiers.
 _CHART_TYPE_MAP = {
-    "bar":  XL_CHART_TYPE.COLUMN_CLUSTERED,   # vertical bar chart (most common)
+    "bar":  XL_CHART_TYPE.COLUMN_CLUSTERED,   # vertical bar chart (default for "bar")
+    "hbar": XL_CHART_TYPE.BAR_CLUSTERED,      # horizontal bar chart
     "pie":  XL_CHART_TYPE.PIE,                # pie / donut chart
     "line": XL_CHART_TYPE.LINE_MARKERS,       # line chart with data point markers
     "area": XL_CHART_TYPE.AREA,               # filled area chart for cumulative trends
@@ -120,6 +123,35 @@ def render_chart_slide(slide, slide_data: dict, slide_num: int) -> None:
 # Internal chart builder
 # ---------------------------------------------------------------------------
 
+def _should_use_horizontal(chart_type_str: str, data: dict) -> bool:
+    """Decide whether a bar chart should render horizontally.
+
+    Horizontal bars look better when category labels are text strings
+    (not years/numbers) and there is only one series — the labels read
+    naturally on the left axis instead of being crammed under vertical
+    columns.
+
+    Args:
+        chart_type_str: Blueprint chart type string.
+        data:           Chart data dict with categories and series.
+
+    Returns:
+        True if horizontal BAR_CLUSTERED should be used instead of
+        COLUMN_CLUSTERED.
+    """
+    if chart_type_str != "bar":
+        return False
+    series_list = data.get("series", [])
+    if len(series_list) != 1:
+        return False   # multiple series → keep vertical for clarity
+    categories = data.get("categories", [])
+    if not categories:
+        return False
+    # If any category is a non-numeric text label → prefer horizontal
+    non_numeric = sum(1 for c in categories if not str(c).replace(".", "").replace(",", "").isdigit())
+    return non_numeric > len(categories) / 2
+
+
 def _add_chart(slide, chart_type_str: str, data: dict, pos: ChartPosition) -> None:
     """Build and embed a native Office chart into the slide.
 
@@ -131,12 +163,17 @@ def _add_chart(slide, chart_type_str: str, data: dict, pos: ChartPosition) -> No
 
     Args:
         slide: python-pptx slide object.
-        chart_type_str: One of "bar", "pie", "line", "area".
+        chart_type_str: One of "bar", "hbar", "pie", "line", "area".
         data: Dict with "categories" (list) and "series" (list of {name, values}).
         pos: ChartPosition holding left/top/width/height in EMU.
     """
+    # Auto-detect horizontal bar when appropriate
+    effective_type = chart_type_str
+    if _should_use_horizontal(chart_type_str, data):
+        effective_type = "hbar"
+
     # Map string → enum; default to clustered column if type is unknown
-    xl_type = _CHART_TYPE_MAP.get(chart_type_str, XL_CHART_TYPE.COLUMN_CLUSTERED)
+    xl_type = _CHART_TYPE_MAP.get(effective_type, XL_CHART_TYPE.COLUMN_CLUSTERED)
 
     categories = data.get("categories", [])
     series_list = data.get("series", [])
@@ -185,13 +222,14 @@ def _add_chart(slide, chart_type_str: str, data: dict, pos: ChartPosition) -> No
     chart = graphic_frame.chart
 
     # Apply visual styling to match the template theme
-    _style_chart(chart, chart_type_str, series_list)
+    _style_chart(chart, effective_type, series_list)
 
 
 def _style_chart(chart, chart_type_str: str, series_list: list[dict]) -> None:
     """Apply theme-consistent visual styling to an embedded chart.
 
-    Covers: legend visibility, series colors, axis fonts, background transparency.
+    Covers: legend visibility, series colors, axis fonts, gap width,
+    gridline removal, axis line cleanup, and background transparency.
 
     Args:
         chart: python-pptx Chart object (from graphic_frame.chart).
@@ -207,14 +245,18 @@ def _style_chart(chart, chart_type_str: str, series_list: list[dict]) -> None:
     # Show the legend only when there are multiple data series
     chart.has_legend = len(series_list) > 1
     if chart.has_legend:
-        chart.legend.position = XL_LEGEND_POSITION.BOTTOM   # put legend below the chart
-        chart.legend.include_in_layout = False               # don't shrink chart area for legend
+        chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        chart.legend.include_in_layout = False
+        try:
+            chart.legend.font.size = Pt(10)
+            chart.legend.font.color.rgb = config.COLOR_TEXT_DARK
+        except Exception:
+            pass
 
     # Apply theme colors to each series in order from config.CHART_COLORS
     try:
         plot = chart.plots[0]
         for i, series in enumerate(plot.series):
-            # Cycle through chart colors if there are more series than colors
             color = config.CHART_COLORS[i % len(config.CHART_COLORS)]
             fill = series.format.fill
             fill.solid()
@@ -222,24 +264,38 @@ def _style_chart(chart, chart_type_str: str, series_list: list[dict]) -> None:
     except Exception as exc:
         logger.debug("Could not apply series colors: %s", exc)
 
-    # Bar-specific: tighten the gap between bars for a cleaner, modern look
-    if chart_type_str == "bar":
+    # Bar / hbar gap width — tighter = wider, bolder bars
+    if chart_type_str in ("bar", "hbar"):
         try:
-            chart.plots[0].gap_width = 80   # default is 150; smaller = wider bars
+            chart.plots[0].gap_width = 40   # default 150; 40 gives thick, modern bars
         except Exception:
             pass
 
-    # Set axis tick label font size and color (value axis = y-axis / numbers)
+    # --- Axis styling: bold dark labels, remove axis lines and gridlines ---
+    # Value axis (y-axis on column, x-axis on horizontal bar)
     try:
-        chart.value_axis.tick_labels.font.size = Pt(10)
-        chart.value_axis.tick_labels.font.color.rgb = config.COLOR_TEXT_MUTED
+        va = chart.value_axis
+        va.tick_labels.font.size = Pt(10)
+        va.tick_labels.font.bold = True
+        va.tick_labels.font.color.rgb = config.COLOR_TEXT_DARK
+        va.format.line.fill.background()           # hide axis line
+        va.major_gridlines.format.line.fill.background()  # hide gridlines
     except Exception:
-        pass   # some chart types (e.g. pie) don't have a value axis
+        pass
 
-    # Category axis = x-axis / category labels
+    # Category axis (x-axis on column, y-axis on horizontal bar)
     try:
-        chart.category_axis.tick_labels.font.size = Pt(10)
-        chart.category_axis.tick_labels.font.color.rgb = config.COLOR_TEXT_MUTED
+        ca = chart.category_axis
+        ca.tick_labels.font.size = Pt(10)
+        ca.tick_labels.font.bold = True
+        ca.tick_labels.font.color.rgb = config.COLOR_TEXT_DARK
+        ca.format.line.fill.background()           # hide axis line
+    except Exception:
+        pass
+
+    # Remove chart area border for a cleaner look
+    try:
+        chart.chart_area.format.line.fill.background()
     except Exception:
         pass
 

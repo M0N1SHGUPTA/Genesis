@@ -280,6 +280,30 @@ def add_slide_number(slide, slide_num: int) -> None:
 # Slide title bar
 # ---------------------------------------------------------------------------
 
+def strip_numeric_prefix(text: str) -> str:
+    """Remove leading numeric prefixes from a string.
+
+    Strips patterns like "1. ", "2) ", "Section 3: ", "Chapter 1 - ", or
+    bare "1 " from the front of slide titles and divider headings so the
+    rendered text reads as clean prose.
+
+    Args:
+        text: The input string (e.g. "1. Strategic Context").
+
+    Returns:
+        The string without the leading prefix (e.g. "Strategic Context").
+    """
+    import re
+    # Matches: "1. ", "01. ", "1) ", "1 - ", "Section 1: ", "Chapter 2 - "
+    cleaned = re.sub(
+        r"^(?:(?:section|chapter)\s+)?\d{1,3}(?:[.):]\s*[-–—]?\s*|\s+[-–—]\s+|\.\s+)",
+        "",
+        text.strip(),
+        flags=re.IGNORECASE,
+    )
+    return cleaned or text   # fallback to original if regex ate everything
+
+
 def add_slide_title(
     slide,
     title: str,
@@ -290,6 +314,7 @@ def add_slide_title(
     All content slides use this to ensure consistent title positioning.
     The title occupies the area from MARGIN_TOP down to CONTENT_TOP.
     Titles are always rendered in the project serif face (config.TITLE_FONT).
+    Leading numeric prefixes ("1. ", "2) ", etc.) are stripped automatically.
 
     Args:
         slide: The python-pptx slide object.
@@ -298,7 +323,7 @@ def add_slide_title(
     """
     add_textbox(
         slide,
-        title,
+        strip_numeric_prefix(title),
         left=config.MARGIN_LEFT,
         top=config.MARGIN_TOP,
         width=config.CONTENT_WIDTH,

@@ -34,6 +34,8 @@ _MAX_TOKENS = 1000  # slide_plan is compact; generous budget still fits easily
 _LAYOUT_REFERENCE = """
 LAYOUT OPTIONS (for "content" and "executive_summary" type slides):
   "two_col_sidebar"          — red sidebar with title + content cards on right (DEFAULT for content with 4+ insights)
+  "six_cards"                — 3×2 grid of small icon-cards (for sections with 5–6 insights)
+  "five_cards_row"           — horizontal row of 5 cards on red background (for recap/conclusion)
   "two_column"               — left column + right column (good for comparisons, before/after)
   "three_cards"              — three equal cards in a row (good for exactly 3 concepts)
   "key_stats"                — 2–4 big KPI numbers with labels
@@ -156,12 +158,14 @@ LAYOUT ASSIGNMENT RULES:
 - "chart" type slide for any section with visual_type "chart"
 - "table" type slide for any section with visual_type "table"
 - "timeline" or "process_flow" layout for sections with visual_type "timeline" or "process_flow"
+- "six_cards" for sections with 5–6 insights (dense info grid)
 - "three_cards" layout for sections with exactly 3 insights
 - "two_col_sidebar" as the DEFAULT for content slides with 4+ insights (replaces plain two_column)
 - "two_column" only when visual_type is "comparison" or for before/after comparisons
 - "key_stats" if has_global_stats is true — use it once for a dedicated KPI slide
 - "icon_list" for sections that list 3–4 named items or recommendations
-- "single_focus" for conclusion and short sections
+- "five_cards_row" for conclusion (red background recap with 5 key takeaways)
+- "single_focus" for short sections with 1–2 insights only
 - NEVER use the same layout on two consecutive "content" slides
 
 {_LAYOUT_REFERENCE}
@@ -272,8 +276,8 @@ Section-sourced slides (content, chart, table, section_divider) MUST have: sourc
             })
 
         _LAYOUT_CYCLE = [
-            "two_col_sidebar", "three_cards", "icon_list",
-            "two_col_sidebar", "timeline", "single_focus",
+            "two_col_sidebar", "three_cards", "six_cards",
+            "two_col_sidebar", "icon_list", "timeline",
         ]
         layout_idx = 0
 
@@ -307,7 +311,9 @@ Section-sourced slides (content, chart, table, section_divider) MUST have: sourc
                 })
             else:
                 insight_count = len(sec.get("key_insights", []))
-                if insight_count == 3:
+                if insight_count in (5, 6):
+                    layout = "six_cards"
+                elif insight_count == 3:
                     layout = "three_cards"
                 elif visual in ("timeline", "process_flow"):
                     layout = visual
@@ -334,11 +340,11 @@ Section-sourced slides (content, chart, table, section_divider) MUST have: sourc
                 "source_section": None,
             })
 
-        # Conclusion
+        # Conclusion — five_cards_row for a punchy red recap
         slides.append({
             "slide_number": len(slides) + 1,
             "type": "conclusion",
-            "layout": "single_focus",
+            "layout": "five_cards_row",
         })
 
         # Thank you

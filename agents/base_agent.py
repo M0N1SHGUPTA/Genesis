@@ -33,34 +33,75 @@ class BaseAgent:
 
     Subclasses implement their own public method (e.g. extract(), plan(),
     transform()) and call _run_with_retry() or _call_llm() internally.
+
+    Uses a shared pool of Groq clients (round-robin) to distribute API calls
+    across multiple API keys, working around free-tier TPM rate limits.
+    Set GROQ_API_KEY_1, GROQ_API_KEY_2, … in .env alongside GROQ_API_KEY.
     """
 
+    # Class-level client pool — shared across all BaseAgent instances
+    _clients: list[Groq] = []
+    _client_index: int = 0
+    _pool_initialized: bool = False
+
     def __init__(self) -> None:
-        self._client = self._init_client()
+        if not BaseAgent._pool_initialized:
+            BaseAgent._clients = self._init_client_pool()
+            BaseAgent._pool_initialized = True
 
     # ------------------------------------------------------------------
-    # Client
+    # Client pool (round-robin across multiple API keys)
     # ------------------------------------------------------------------
 
-    def _init_client(self) -> Groq | None:
-        """Initialise Groq client from GROQ_API_KEY.
+    @staticmethod
+    def _init_client_pool() -> list[Groq]:
+        """Initialise Groq clients from all GROQ_API_KEY* env variables.
 
-        Returns None when the key is missing so callers can fall back
-        to rule-based logic gracefully.
+        Reads GROQ_API_KEY plus GROQ_API_KEY_1 through GROQ_API_KEY_10.
+        Deduplicates keys so the same key isn't counted twice.
+        Returns empty list when no keys are found.
         """
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            logger.warning(
-                "%s: GROQ_API_KEY not set — agent unavailable.",
-                self.__class__.__name__,
-            )
-            return None
-        return Groq(api_key=api_key)
+        keys: list[str] = []
+
+        main_key = os.getenv("GROQ_API_KEY")
+        if main_key:
+            keys.append(main_key)
+
+        for i in range(1, 11):
+            key = os.getenv(f"GROQ_API_KEY_{i}")
+            if key and key not in keys:
+                keys.append(key)
+
+        if not keys:
+            logger.warning("No GROQ_API_KEY* found in environment — agents unavailable.")
+            return []
+
+        clients = [Groq(api_key=k) for k in keys]
+        logger.info(
+            "Groq client pool: %d key(s) loaded for round-robin distribution.",
+            len(clients),
+        )
+        return clients
+
+    def _next_client(self) -> tuple[Groq, int]:
+        """Return the next client in round-robin rotation.
+
+        Returns:
+            Tuple of (Groq client, 1-based key index for logging).
+
+        Raises:
+            ValueError: If the client pool is empty.
+        """
+        if not BaseAgent._clients:
+            raise ValueError(f"{self.__class__.__name__}: No Groq clients available.")
+        idx = BaseAgent._client_index % len(BaseAgent._clients)
+        BaseAgent._client_index += 1
+        return BaseAgent._clients[idx], idx + 1
 
     @property
     def available(self) -> bool:
-        """True when the Groq client is ready to make API calls."""
-        return self._client is not None
+        """True when at least one Groq client is ready."""
+        return len(BaseAgent._clients) > 0
 
     # ------------------------------------------------------------------
     # LLM call
@@ -74,6 +115,9 @@ class BaseAgent:
     ) -> str:
         """Send a single prompt to the Groq API and return the raw text.
 
+        Automatically rotates through the client pool so consecutive calls
+        hit different API keys, spreading the TPM (tokens-per-minute) load.
+
         Args:
             prompt:     User-turn prompt string.
             system:     System prompt string.
@@ -85,11 +129,10 @@ class BaseAgent:
         Raises:
             ValueError: On API error or empty response.
         """
-        if self._client is None:
-            raise ValueError(f"{self.__class__.__name__}: Groq client not initialised.")
+        client, key_num = self._next_client()
 
         try:
-            response = self._client.chat.completions.create(
+            response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
                     {"role": "system", "content": system},
@@ -103,7 +146,7 @@ class BaseAgent:
                 raise ValueError("LLM returned an empty response.")
             return text
         except Exception as exc:
-            raise ValueError(f"Groq API error: {exc}") from exc
+            raise ValueError(f"Groq API error (key {key_num}): {exc}") from exc
 
     # ------------------------------------------------------------------
     # JSON parsing

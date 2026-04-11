@@ -83,6 +83,7 @@ class DesignEnforcer:
                 self._fix_empty_arrays(slide)
                 self._fix_three_cards_count(slide)
                 self._fix_key_stats_count(slide)
+                self._fix_layout_density(slide)
 
             self._fix_layout_variety(blueprint["slides"])
             self._fix_visual_intensity(blueprint["slides"])
@@ -148,6 +149,23 @@ class DesignEnforcer:
             slide["subtitle"] = " ".join(words[:22]) + "…"
             logger.debug("Validator: truncated cover subtitle to 22 words.")
 
+    @staticmethod
+    def _truncate_words(text: str, limit: int) -> str:
+        """Trim a string to a maximum number of words."""
+        words = str(text).split()
+        if len(words) <= limit:
+            return str(text)
+        return " ".join(words[:limit]) + "…"
+
+    def _trim_points(self, container: dict, *, max_items: int, max_words: int) -> None:
+        """Trim a dict's points list in-place when it exists."""
+        if not isinstance(container, dict) or "points" not in container:
+            return
+        container["points"] = [
+            self._truncate_words(point, max_words)
+            for point in container.get("points", [])[:max_items]
+        ]
+
     # ------------------------------------------------------------------
     # Rule 5: Bullet text ≤ 15 words
     # ------------------------------------------------------------------
@@ -159,40 +177,143 @@ class DesignEnforcer:
         overflow while leaving room for real, fact-bearing sentences
         (company names, dollar figures, dates) that 15 words would chop.
         """
-        def _truncate(t: str, n: int = 22) -> str:
-            words = t.split()
-            if len(words) <= n:
-                return t
-            return " ".join(words[:n]) + "…"
-
         # top-level "points" (agenda, single_focus, conclusion)
         if "points" in slide:
-            slide["points"] = [_truncate(p) for p in slide["points"]]
+            slide["points"] = [self._truncate_words(p, 22) for p in slide["points"]]
 
         # two_column / comparison / executive_summary: left.points / right.points
         for side in ("left", "right"):
             col = slide.get(side)
             if isinstance(col, dict) and "points" in col:
-                col["points"] = [_truncate(p) for p in col["points"]]
+                col["points"] = [self._truncate_words(p, 22) for p in col["points"]]
 
         # three_cards: cards[*].points
         for card in slide.get("cards", []):
             if "points" in card:
-                card["points"] = [_truncate(p) for p in card["points"]]
+                card["points"] = [self._truncate_words(p, 22) for p in card["points"]]
+            if "description" in card:
+                card["description"] = self._truncate_words(card["description"], 22)
+            if "heading" in card:
+                card["heading"] = self._truncate_words(card["heading"], 8)
 
         # timeline / process_flow: steps[*].description
         for step in slide.get("steps", []):
             if "description" in step:
-                step["description"] = _truncate(step["description"], 18)
+                step["description"] = self._truncate_words(step["description"], 18)
+            if "heading" in step:
+                step["heading"] = self._truncate_words(step["heading"], 8)
 
         # icon_list: items[*].description
         for item in slide.get("items", []):
             if "description" in item:
-                item["description"] = _truncate(item["description"])
+                item["description"] = self._truncate_words(item["description"], 22)
+            if "heading" in item:
+                item["heading"] = self._truncate_words(item["heading"], 8)
+
+        for stat in slide.get("stats", []):
+            if "label" in stat:
+                stat["label"] = self._truncate_words(stat["label"], 6)
 
         # single_focus: "focus" field — allow up to 25 words for synthesis
         if "focus" in slide:
-            slide["focus"] = _truncate(slide["focus"], 25)
+            slide["focus"] = self._truncate_words(slide["focus"], 25)
+
+    def _fix_layout_density(self, slide: dict) -> None:
+        """Apply stricter layout-specific caps so dense slides stay readable."""
+        layout = slide.get("layout", "")
+        slide_type = slide.get("type", "")
+
+        if slide_type == "agenda" and "points" in slide:
+            slide["points"] = [
+                self._truncate_words(point, 8)
+                for point in slide.get("points", [])[:8]
+            ]
+
+        if layout == "single_focus":
+            if "focus" in slide:
+                slide["focus"] = self._truncate_words(slide["focus"], 18)
+            if "points" in slide:
+                slide["points"] = [
+                    self._truncate_words(point, 12)
+                    for point in slide.get("points", [])[:4]
+                ]
+
+        elif layout in ("two_column", "comparison"):
+            for side in ("left", "right"):
+                col = slide.get(side)
+                if isinstance(col, dict) and col.get("heading"):
+                    col["heading"] = self._truncate_words(col["heading"], 5)
+                self._trim_points(col, max_items=4, max_words=12)
+
+        elif layout == "two_col_sidebar":
+            for side in ("left", "right"):
+                col = slide.get(side)
+                if isinstance(col, dict) and col.get("heading"):
+                    col["heading"] = self._truncate_words(col["heading"], 5)
+                self._trim_points(col, max_items=4, max_words=12)
+            if "points" in slide:
+                slide["points"] = [
+                    self._truncate_words(point, 12)
+                    for point in slide.get("points", [])[:8]
+                ]
+
+        elif layout == "three_cards":
+            for card in slide.get("cards", [])[:3]:
+                if card.get("heading"):
+                    card["heading"] = self._truncate_words(card["heading"], 4)
+                if "points" in card:
+                    card["points"] = [
+                        self._truncate_words(point, 10)
+                        for point in card.get("points", [])[:3]
+                    ]
+
+        elif layout in ("six_cards", "five_cards_row"):
+            max_cards = 5 if layout == "five_cards_row" else 6
+            slide["cards"] = slide.get("cards", [])[:max_cards]
+            for card in slide.get("cards", []):
+                if card.get("heading"):
+                    card["heading"] = self._truncate_words(card["heading"], 4)
+                if card.get("description"):
+                    card["description"] = self._truncate_words(card["description"], 14)
+                if "points" in card:
+                    card["points"] = [
+                        self._truncate_words(point, 10)
+                        for point in card.get("points", [])[:2]
+                    ]
+
+        elif layout == "key_stats":
+            for stat in slide.get("stats", [])[:4]:
+                if stat.get("label"):
+                    stat["label"] = self._truncate_words(stat["label"], 4)
+
+        elif layout in ("timeline", "process_flow"):
+            slide["steps"] = slide.get("steps", [])[:4]
+            for step in slide.get("steps", []):
+                if step.get("heading"):
+                    step["heading"] = self._truncate_words(step["heading"], 4)
+                if step.get("description"):
+                    step["description"] = self._truncate_words(step["description"], 10)
+
+        elif layout == "icon_list":
+            slide["items"] = slide.get("items", [])[:4]
+            for item in slide.get("items", []):
+                if item.get("heading"):
+                    item["heading"] = self._truncate_words(item["heading"], 5)
+                if item.get("description"):
+                    item["description"] = self._truncate_words(item["description"], 14)
+
+        elif layout == "exec_summary_with_photo":
+            slide["items"] = slide.get("items", [])[:4]
+            for item in slide.get("items", []):
+                if item.get("heading"):
+                    item["heading"] = self._truncate_words(item["heading"], 4)
+                if item.get("description"):
+                    item["description"] = self._truncate_words(item["description"], 18)
+            for side in ("left", "right"):
+                col = slide.get(side)
+                if isinstance(col, dict) and col.get("heading"):
+                    col["heading"] = self._truncate_words(col["heading"], 5)
+                self._trim_points(col, max_items=2, max_words=14)
 
     # ------------------------------------------------------------------
     # Rule 6: No empty arrays

@@ -28,6 +28,7 @@ from renderer.utils import (
     add_bullet_textbox,
     add_slide_number,
     add_slide_title,
+    pick_contrasting_text,
     style_shape,
 )
 from renderer.visuals import (
@@ -180,6 +181,7 @@ def _agenda_layout(slide, data: dict) -> None:
     NUM_FONT = Pt(18)
     ITEM_HEIGHT = Inches(0.65)
     NUM_WIDTH = Inches(0.55)
+    badge_text_color = pick_contrasting_text(config.COLOR_PRIMARY)
 
     if len(points) <= 4:
         # Single column, large numbered items
@@ -194,7 +196,7 @@ def _agenda_layout(slide, data: dict) -> None:
                 left=ML, top=row_top + Inches(0.05),
                 width=Inches(0.45), height=Inches(0.45),
                 font_size=NUM_FONT, bold=True,
-                color=config.COLOR_TEXT_LIGHT,
+                color=badge_text_color,
                 align=PP_ALIGN.CENTER,
             )
             # Item text
@@ -507,7 +509,7 @@ def _timeline(slide, data: dict) -> None:
             left=cx - circle_r, top=circle_top,
             width=circle_size, height=circle_size,
             font_size=Pt(11), bold=True,
-            color=config.COLOR_TEXT_LIGHT,
+            color=pick_contrasting_text(config.COLOR_PRIMARY),
             align=PP_ALIGN.CENTER,
         )
 
@@ -627,7 +629,7 @@ def _comparison(slide, data: dict) -> None:
         box = slide.shapes.add_shape(1, left, CT, col_width, col_height)
         style_shape(box, fill_color=bg, line_color=None)
 
-        text_color = config.COLOR_TEXT_LIGHT
+        text_color = pick_contrasting_text(bg)
 
         # Icon glyph in top-left corner (white on colored background)
         heading = col.get("heading", "")
@@ -637,7 +639,7 @@ def _comparison(slide, data: dict) -> None:
             slide, icon_name,
             left=left + PAD, top=CT + PAD,
             size=icon_size,
-            fill=config.COLOR_TEXT_LIGHT,
+            fill=text_color,
         )
 
         if heading:
@@ -700,7 +702,7 @@ def _icon_list(slide, data: dict) -> None:
             slide, icon_name,
             left=glyph_left, top=glyph_top,
             size=glyph_size,
-            fill=config.COLOR_TEXT_LIGHT,
+            fill=pick_contrasting_text(config.COLOR_PRIMARY),
         )
 
         # Heading to the right
@@ -1093,6 +1095,7 @@ def _exec_summary_with_photo(slide, data: dict) -> None:
         0, 0, sidebar_w, config.SLIDE_HEIGHT,
     )
     style_shape(sidebar, fill_color=config.COLOR_PRIMARY, line_color=None)
+    sidebar_text_color = pick_contrasting_text(config.COLOR_PRIMARY)
 
     # Large centred "01" marker near the top of the sidebar (mirrors the
     # numbered rhythm from the target deck's section dividers).
@@ -1101,14 +1104,14 @@ def _exec_summary_with_photo(slide, data: dict) -> None:
         left=Inches(0.5), top=Inches(0.5),
         width=Inches(3.2), height=Inches(1.0),
         font_size=Pt(48), bold=True,
-        color=config.COLOR_TEXT_LIGHT,
+        color=sidebar_text_color,
         font_name=config.TITLE_FONT,
     )
 
     # Thin white divider line under the 01
     divider = slide.shapes.add_shape(1, Inches(0.5), Inches(1.55),
                                      Inches(0.8), Inches(0.03))
-    style_shape(divider, fill_color=config.COLOR_TEXT_LIGHT, line_color=None)
+    style_shape(divider, fill_color=sidebar_text_color, line_color=None)
 
     # The main title — large, white, serif, left-aligned inside the sidebar
     add_textbox(
@@ -1116,7 +1119,7 @@ def _exec_summary_with_photo(slide, data: dict) -> None:
         left=Inches(0.5), top=Inches(1.9),
         width=Inches(3.2), height=Inches(3.0),
         font_size=Pt(40), bold=True,
-        color=config.COLOR_TEXT_LIGHT,
+        color=sidebar_text_color,
         font_name=config.TITLE_FONT,
     )
 
@@ -1126,7 +1129,11 @@ def _exec_summary_with_photo(slide, data: dict) -> None:
         left=Inches(0.5), top=Inches(6.4),
         width=Inches(3.2), height=Inches(0.4),
         font_size=Pt(10), bold=True,
-        color=RGBColor_light_pink(),
+        color=(
+            RGBColor_light_pink()
+            if sidebar_text_color == config.COLOR_TEXT_LIGHT
+            else config.COLOR_TEXT_SECONDARY
+        ),
     )
 
     # --- Right side: 2x2 grid of icon cards ---

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
@@ -29,6 +30,7 @@ from renderer.utils import (
     add_slide_number,
     get_layout_by_name,
     get_blank_layout,
+    pick_contrasting_text,
     remove_template_slides,
     strip_numeric_prefix,
     style_shape,
@@ -426,27 +428,8 @@ class Renderer:
         COLOR_CARD_BORDER, COLOR_HEADER_BG, and CHART_COLORS automatically
         use the template's real palette instead of the hardcoded red defaults.
         """
-        from lxml import etree  # noqa: PLC0415
-
         try:
-            master = prs.slide_masters[0]
-            theme_part = master.part.part_related_by(
-                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme"
-            )
-            root = etree.fromstring(theme_part.blob)
-            ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
-
-            color_map: dict[str, RGBColor] = {}
-            for elem in root.iter(f"{{{ns}}}srgbClr"):
-                val = elem.get("val", "")
-                if len(val) == 6:
-                    try:
-                        r, g, b = int(val[:2], 16), int(val[2:4], 16), int(val[4:6], 16)
-                        parent_tag = elem.getparent().tag.split("}")[-1]
-                        color_map[parent_tag] = RGBColor(r, g, b)
-                    except ValueError:
-                        pass
-
+            color_map = config.read_theme_color_roles(prs)
             if not color_map:
                 return
 
@@ -567,13 +550,12 @@ class Renderer:
         fills them with the title and subtitle. Otherwise falls back to
         manually positioned text boxes drawn on top of the background.
         """
-        # Look for a layout named "cover" — common in most Slide Masters
         layout = get_layout_by_name(prs, "cover")
-        # Some templates name the cover layout with a "1_" prefix — try that too
         if "cover" not in layout.name.lower():
             layout = get_layout_by_name(prs, "1_")
 
         slide = prs.slides.add_slide(layout)
+        self._clear_placeholders(slide)
 
         title = data.get("title", "")
         subtitle = data.get("subtitle", "")
@@ -583,35 +565,54 @@ class Renderer:
         if len(words) > 20:
             subtitle = " ".join(words[:20]) + "…"
 
-        # Attempt to fill the template's built-in title/subtitle placeholders
-        filled = self._fill_placeholders(slide, title=title, subtitle=subtitle)
+        panel_left = config.MARGIN_LEFT
+        panel_top = Inches(3.35)
+        panel_width = Inches(9.1)
+        panel_height = Inches(2.45)
 
-        if not filled:
-            # Placeholders didn't work — draw text boxes manually
-            self._clear_placeholders(slide)
-            # Large centred title in white (template backgrounds are usually dark)
+        panel = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            panel_left,
+            panel_top,
+            panel_width,
+            panel_height,
+        )
+        style_shape(
+            panel,
+            fill_color=config.COLOR_TEXT_LIGHT,
+            line_color=config.COLOR_PRIMARY,
+            fill_transparency=0.08,
+        )
+
+        accent = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            panel_left,
+            panel_top,
+            Inches(0.18),
+            panel_height,
+        )
+        style_shape(accent, fill_color=config.COLOR_PRIMARY, line_color=None)
+
+        add_textbox(
+            slide, title,
+            left=panel_left + Inches(0.42),
+            top=panel_top + Inches(0.3),
+            width=panel_width - Inches(0.7),
+            height=Inches(1.1),
+            font_size=Pt(30), bold=True,
+            color=config.COLOR_TEXT_DARK,
+            font_name=config.TITLE_FONT,
+        )
+        if subtitle:
             add_textbox(
-                slide, title,
-                left=config.MARGIN_LEFT,
-                top=Inches(2.5),           # roughly vertically centred on a 7.5" slide
-                width=config.CONTENT_WIDTH,
-                height=Inches(1.5),
-                font_size=Pt(40), bold=True,
-                color=config.COLOR_TEXT_LIGHT,
-                align=PP_ALIGN.CENTER,
-                font_name=config.TITLE_FONT,
+                slide, subtitle,
+                left=panel_left + Inches(0.42),
+                top=panel_top + Inches(1.45),
+                width=panel_width - Inches(0.7),
+                height=Inches(0.65),
+                font_size=Pt(16),
+                color=config.COLOR_TEXT_SECONDARY,
             )
-            if subtitle:
-                add_textbox(
-                    slide, subtitle,
-                    left=config.MARGIN_LEFT,
-                    top=Inches(4.2),       # below the title
-                    width=config.CONTENT_WIDTH,
-                    height=Inches(0.8),
-                    font_size=config.SUBTITLE_FONT_SIZE,
-                    color=config.COLOR_TEXT_LIGHT,
-                    align=PP_ALIGN.CENTER,
-                )
 
     def _render_divider(self, prs: Presentation, data: dict) -> None:
         """Render a section divider slide.
@@ -629,6 +630,12 @@ class Renderer:
         title = strip_numeric_prefix(data.get("title", ""))
         subtitle = data.get("subtitle", "")
         section_num = data.get("section_number", "")
+        divider_text_color = pick_contrasting_text(config.COLOR_PRIMARY)
+        divider_subtitle_color = (
+            RGBColor(0xFF, 0xE5, 0xE1)
+            if divider_text_color == config.COLOR_TEXT_LIGHT
+            else config.COLOR_TEXT_SECONDARY
+        )
 
         # Full-bleed red background
         bg = slide.shapes.add_shape(
@@ -643,7 +650,7 @@ class Renderer:
                 left=config.MARGIN_LEFT, top=Inches(1.4),
                 width=Inches(3.0), height=Inches(1.6),
                 font_size=Pt(80), bold=True,
-                color=config.COLOR_TEXT_LIGHT,
+                color=divider_text_color,
                 font_name=config.TITLE_FONT,
             )
 
@@ -653,7 +660,7 @@ class Renderer:
             1, config.MARGIN_LEFT, line_top,
             Inches(1.2), Inches(0.035),
         )
-        style_shape(line, fill_color=config.COLOR_TEXT_LIGHT, line_color=None)
+        style_shape(line, fill_color=divider_text_color, line_color=None)
 
         # Section title — large, white, serif
         title_top = line_top + Inches(0.25)
@@ -662,19 +669,18 @@ class Renderer:
             left=config.MARGIN_LEFT, top=title_top,
             width=config.CONTENT_WIDTH, height=Inches(1.5),
             font_size=Pt(36), bold=True,
-            color=config.COLOR_TEXT_LIGHT,
+            color=divider_text_color,
             font_name=config.TITLE_FONT,
         )
 
         # Subtitle — light pink for readability on red
         if subtitle:
-            from pptx.dml.color import RGBColor
             add_textbox(
                 slide, subtitle,
                 left=config.MARGIN_LEFT, top=title_top + Inches(1.6),
                 width=config.CONTENT_WIDTH, height=Inches(0.8),
                 font_size=config.SUBTITLE_FONT_SIZE,
-                color=RGBColor(0xFF, 0xE5, 0xE1),
+                color=divider_subtitle_color,
             )
 
     def _render_thank_you(self, prs: Presentation, data: dict) -> None:
@@ -686,33 +692,57 @@ class Renderer:
         # Look for a layout whose name contains "thank"
         layout = get_layout_by_name(prs, "thank")
         slide = prs.slides.add_slide(layout)
+        self._clear_placeholders(slide)
 
         title = data.get("title", "Thank You")
         subtitle = data.get("subtitle", "")
 
-        filled = self._fill_placeholders(slide, title=title, subtitle=subtitle)
+        card_width = Inches(6.8)
+        card_height = Inches(2.35)
+        card_left = int((config.SLIDE_WIDTH - card_width) / 2)
+        card_top = Inches(2.45)
 
-        if not filled:
-            self._clear_placeholders(slide)
-            # Large centred "Thank You" text
+        card = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            card_left,
+            card_top,
+            card_width,
+            card_height,
+        )
+        style_shape(
+            card,
+            fill_color=config.COLOR_TEXT_LIGHT,
+            line_color=config.COLOR_PRIMARY,
+            fill_transparency=0.06,
+        )
+
+        accent = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            card_left,
+            card_top,
+            card_width,
+            Inches(0.08),
+        )
+        style_shape(accent, fill_color=config.COLOR_PRIMARY, line_color=None)
+
+        add_textbox(
+            slide, title,
+            left=card_left + Inches(0.35), top=card_top + Inches(0.48),
+            width=card_width - Inches(0.7), height=Inches(0.8),
+            font_size=Pt(34), bold=True,
+            color=config.COLOR_TEXT_DARK,
+            align=PP_ALIGN.CENTER,
+            font_name=config.TITLE_FONT,
+        )
+        if subtitle:
             add_textbox(
-                slide, title,
-                left=config.MARGIN_LEFT, top=Inches(2.8),
-                width=config.CONTENT_WIDTH, height=Inches(1.2),
-                font_size=Pt(48), bold=True,
-                color=config.COLOR_TEXT_LIGHT,
+                slide, subtitle,
+                left=card_left + Inches(0.35), top=card_top + Inches(1.38),
+                width=card_width - Inches(0.7), height=Inches(0.45),
+                font_size=Pt(15),
+                color=config.COLOR_TEXT_SECONDARY,
                 align=PP_ALIGN.CENTER,
-                font_name=config.TITLE_FONT,
             )
-            if subtitle:
-                add_textbox(
-                    slide, subtitle,
-                    left=config.MARGIN_LEFT, top=Inches(4.2),
-                    width=config.CONTENT_WIDTH, height=Inches(0.6),
-                    font_size=config.SUBTITLE_FONT_SIZE,
-                    color=config.COLOR_TEXT_MUTED,
-                    align=PP_ALIGN.CENTER,
-                )
 
     # ------------------------------------------------------------------
     # Placeholder helpers

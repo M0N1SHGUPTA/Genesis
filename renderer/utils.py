@@ -13,7 +13,7 @@ from typing import Optional
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.ns import qn          # converts "a:tag" → "{namespace}tag" for lxml
 from pptx.util import Inches, Pt, Emu
 from lxml import etree               # for direct XML manipulation (corner radius, cell fills)
@@ -74,6 +74,38 @@ def get_blank_layout(prs: Presentation):
 # Text box creation
 # ---------------------------------------------------------------------------
 
+def _rgb_channels(color: RGBColor) -> tuple[int, int, int]:
+    """Return a color object as a plain (r, g, b) tuple."""
+    return int(color[0]), int(color[1]), int(color[2])
+
+
+def relative_luminance(color: RGBColor) -> float:
+    """Compute WCAG relative luminance for an RGB color."""
+    def _channel(v: int) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = _rgb_channels(color)
+    return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
+
+
+def is_light_color(color: RGBColor, threshold: float = 0.62) -> bool:
+    """Return True when a color is light enough to need dark foreground text."""
+    return relative_luminance(color) >= threshold
+
+
+def pick_contrasting_text(
+    fill_color: RGBColor,
+    dark: RGBColor | None = None,
+    light: RGBColor | None = None,
+) -> RGBColor:
+    """Choose a readable foreground color for the provided fill color."""
+    if dark is None:
+        dark = config.COLOR_TEXT_DARK
+    if light is None:
+        light = config.COLOR_TEXT_LIGHT
+    return dark if is_light_color(fill_color) else light
+
 def add_textbox(
     slide,
     text: str,
@@ -117,6 +149,10 @@ def add_textbox(
     txBox = slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
     tf.word_wrap = word_wrap   # prevents text from spilling outside the box boundary
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    except Exception:
+        pass
 
     # Text boxes without a fill (transparent background) should have zero
     # internal margins so they don't waste space. Boxes WITH fill keep a
@@ -187,6 +223,10 @@ def add_bullet_textbox(
     txBox = slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
     tf.word_wrap = True   # essential — bullets can be long
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    except Exception:
+        pass
 
     # Add one paragraph per bullet point (hard cap at 6 to prevent text overflow)
     for i, point in enumerate(points[:6]):
@@ -214,6 +254,7 @@ def style_shape(
     line_color: Optional[RGBColor] = None,
     line_width: Pt = config.CARD_BORDER_WIDTH,
     corner_radius: Emu = config.CARD_CORNER_RADIUS,
+    fill_transparency: float = 0.0,
 ) -> None:
     """Apply fill color, border color/width, and corner radius to a shape.
 
@@ -231,6 +272,10 @@ def style_shape(
     if fill_color is not None:
         shape.fill.solid()                      # switch fill type to solid
         shape.fill.fore_color.rgb = fill_color  # set the fill color
+        try:
+            shape.fill.transparency = max(0.0, min(1.0, fill_transparency))
+        except Exception:
+            pass
     else:
         shape.fill.background()   # transparent fill (shows slide background through)
 

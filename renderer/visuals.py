@@ -35,7 +35,12 @@ from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
 import config
-from renderer.utils import add_textbox, strip_numeric_prefix, style_shape
+from renderer.utils import (
+    add_textbox,
+    pick_contrasting_text,
+    strip_numeric_prefix,
+    style_shape,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +100,12 @@ def draw_red_left_sidebar(
     """
     title = strip_numeric_prefix(title)
     sidebar_w = Emu(int(config.SLIDE_WIDTH * width_frac))
+    sidebar_text_color = pick_contrasting_text(config.COLOR_PRIMARY)
+    subtitle_color = (
+        RGBColor(0xFF, 0xE5, 0xE1)
+        if sidebar_text_color == config.COLOR_TEXT_LIGHT
+        else config.COLOR_TEXT_SECONDARY
+    )
 
     # Full-height red rectangle
     bar = slide.shapes.add_shape(
@@ -113,7 +124,7 @@ def draw_red_left_sidebar(
             left=inner_left, top=Inches(1.0),
             width=inner_width, height=Inches(1.0),
             font_size=Pt(56), bold=True,
-            color=config.COLOR_TEXT_LIGHT,
+            color=sidebar_text_color,
         )
 
     # Title — serif, big, white
@@ -123,7 +134,7 @@ def draw_red_left_sidebar(
         left=inner_left, top=title_top,
         width=inner_width, height=Inches(2.8),
         font_size=Pt(28), bold=True,
-        color=config.COLOR_TEXT_LIGHT,
+        color=sidebar_text_color,
     )
     # Upgrade the title run to serif
     for para in title_box.text_frame.paragraphs:
@@ -137,7 +148,7 @@ def draw_red_left_sidebar(
             left=inner_left, top=title_top + Inches(2.9),
             width=inner_width, height=Inches(1.2),
             font_size=Pt(12),
-            color=RGBColor(0xFF, 0xE5, 0xE1),   # muted pink-white for readability on red
+            color=subtitle_color,
         )
 
     return sidebar_w
@@ -179,7 +190,7 @@ def draw_red_top_pill(slide, title: str) -> None:
         left=left + Inches(0.4), top=top + Inches(0.12),
         width=width - Inches(0.8), height=Inches(0.7),
         font_size=Pt(22), bold=True,
-        color=config.COLOR_TEXT_LIGHT,
+        color=pick_contrasting_text(config.COLOR_PRIMARY),
         align=PP_ALIGN.LEFT,
     )
     for para in title_box.text_frame.paragraphs:
@@ -238,7 +249,7 @@ def draw_numbered_badge(
     if fill is None:
         fill = config.COLOR_PRIMARY
     if text_color is None:
-        text_color = config.COLOR_TEXT_LIGHT
+        text_color = pick_contrasting_text(fill)
 
     circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, left, top, size, size)
     style_shape(circle, fill_color=fill, line_color=None)
@@ -344,7 +355,7 @@ def draw_card_with_divider(
             left=left + pad, top=cursor_top,
             width=width - 2 * pad, height=body_h,
             font_size=body_size,
-            color=config.COLOR_TEXT_MUTED,
+            color=config.COLOR_TEXT_SECONDARY,
         )
 
 

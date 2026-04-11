@@ -21,7 +21,7 @@ from pptx.oxml.ns import qn      # converts "a:tag" → "{namespace}tag" for lxm
 from lxml import etree            # for direct XML manipulation of cell properties
 
 import config
-from renderer.utils import add_slide_title, add_slide_number, add_textbox
+from renderer.utils import add_slide_title, add_slide_number, add_textbox, pick_contrasting_text
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +145,7 @@ def _add_styled_table(
         col.width = col_width
 
     # --- Header row (row index 0) ---
+    header_text_color = pick_contrasting_text(config.COLOR_HEADER_BG)
     for col_idx, header_text in enumerate(headers):
         cell = table.cell(0, col_idx)    # row=0 is the header row
         cell.text = str(header_text)
@@ -152,7 +153,7 @@ def _add_styled_table(
             cell,
             font_size=Pt(13),
             bold=True,
-            text_color=config.COLOR_TEXT_LIGHT,   # white text
+            text_color=header_text_color,
             bg_color=config.COLOR_HEADER_BG,       # red background
             align=PP_ALIGN.CENTER,                 # centred in header
         )

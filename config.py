@@ -39,9 +39,9 @@ SUBTITLE_FONT_SIZE = Pt(18)
 BODY_FONT_SIZE = Pt(14)
 CAPTION_FONT_SIZE = Pt(11)
 CARD_HEADING_SIZE = Pt(16)
-STAT_NUMBER_SIZE = Pt(52)
-STAT_LABEL_SIZE = Pt(12)
-SECTION_NUMBER_SIZE = Pt(64)
+STAT_NUMBER_SIZE = Pt(68)
+STAT_LABEL_SIZE = Pt(13)
+SECTION_NUMBER_SIZE = Pt(80)
 SLIDE_NUM_SIZE = Pt(10)
 
 # ---------------------------------------------------------------------------
@@ -58,12 +58,13 @@ COLOR_SECONDARY = RGBColor(0x1A, 0x1A, 0x2E)
 COLOR_TEXT_DARK = RGBColor(0x1A, 0x1A, 0x1A)
 COLOR_TEXT_LIGHT = RGBColor(0xFF, 0xFF, 0xFF)
 COLOR_TEXT_MUTED = RGBColor(0x66, 0x66, 0x66)
-COLOR_TEXT_SECONDARY = RGBColor(0x44, 0x44, 0x44)
+COLOR_TEXT_SECONDARY = RGBColor(0x1F, 0x1F, 0x1F)  # Near-black — avoids faded look on cream cards
 COLOR_CARD_BG = RGBColor(0xF9, 0xF0, 0xEE)
 COLOR_CARD_BORDER = RGBColor(0xE8, 0x3F, 0x33)
 COLOR_ALT_ROW = RGBColor(0xF5, 0xF5, 0xF5)
 COLOR_HEADER_BG = RGBColor(0xE8, 0x3F, 0x33)
 COLOR_DIVIDER_BG = RGBColor(0x1A, 0x1A, 0x1A)
+COLOR_ACCENT_DARK = RGBColor(0x2D, 0x2D, 0x2D)
 
 # ---------------------------------------------------------------------------
 # Chart colors
@@ -80,8 +81,8 @@ CHART_COLORS = [
 # ---------------------------------------------------------------------------
 # Spacing
 # ---------------------------------------------------------------------------
-CARD_GAP = Inches(0.25)
-ELEMENT_GAP = Inches(0.3)
+CARD_GAP = Inches(0.2)
+ELEMENT_GAP = Inches(0.25)
 INNER_PADDING = Inches(0.2)
 BULLET_INDENT = Inches(0.15)
 

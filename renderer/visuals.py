@@ -355,7 +355,7 @@ def draw_card_with_divider(
             left=left + pad, top=cursor_top,
             width=width - 2 * pad, height=body_h,
             font_size=body_size,
-            color=config.COLOR_TEXT_SECONDARY,
+            color=config.COLOR_TEXT_DARK,
         )
 
 
@@ -370,24 +370,38 @@ _ICON_MAP: list[tuple[str, int]] = [
     # (keyword regex, MSO_SHAPE int id)
     (r"\b(growth|increase|rise|up|expansion|expand)\b",     MSO_SHAPE.UP_ARROW),
     (r"\b(decline|decrease|fall|drop|down|loss)\b",         MSO_SHAPE.DOWN_ARROW),
+    (r"\b(acqui|merger|m&a|deal|buyout|takeover|divest)\b", MSO_SHAPE.STAR_5_POINT),
+    (r"\b(learn|educat|train|reskill|course|certif|"
+     r"academ|school|university)\b",                        MSO_SHAPE.RECTANGLE),
     (r"\b(invest|capital|fund|budget|cost|price|revenue|"
-     r"financ|money|trillion|billion|dollar)\b",            MSO_SHAPE.OVAL),  # circle as "coin"
+     r"financ|money|trillion|billion|dollar)\b",            MSO_SHAPE.OVAL),
     (r"\b(ai|intelligen|tech|power|electric|energy|"
-     r"innovation|innov)\b",                                MSO_SHAPE.LIGHTNING_BOLT),
-    (r"\b(secur|risk|threat|defens|protect|shield)\b",      MSO_SHAPE.PENTAGON),
+     r"innovation|innov|digital|automat|software|"
+     r"machine|neural|comput|algorithm|agent)\b",           MSO_SHAPE.LIGHTNING_BOLT),
+    (r"\b(secur|risk|threat|defens|protect|shield|"
+     r"cyber|identity|privacy)\b",                          MSO_SHAPE.PENTAGON),
+    (r"\b(consult|advisory|professional|service|"
+     r"practice|deliver)\b",                                MSO_SHAPE.DIAMOND),
+    (r"\b(engineer|manufactur|aerospace|industrial|"
+     r"factory|infrastr|construct)\b",                      MSO_SHAPE.HEXAGON),
     (r"\b(people|talent|workforce|employ|human|"
-     r"citizen|community|team)\b",                          MSO_SHAPE.HEART),
+     r"citizen|community|team|headcount)\b",                MSO_SHAPE.HEART),
     (r"\b(global|world|international|nation|region|"
-     r"country|cross-border)\b",                            MSO_SHAPE.DONUT),
+     r"country|cross-border|geographic)\b",                 MSO_SHAPE.DONUT),
     (r"\b(time|speed|deadline|schedul|phase|timeline|"
      r"quarter|year|month)\b",                              MSO_SHAPE.RIGHT_ARROW),
     (r"\b(strategy|goal|target|objective|vision|"
-     r"mission|plan)\b",                                    MSO_SHAPE.STAR_5_POINT),
+     r"mission|plan|recommend|priorit)\b",                  MSO_SHAPE.STAR_5_POINT),
+    (r"\b(integrat|consolidat|embed|align|unif|transform|"
+     r"reinvent|restructur)\b",                             MSO_SHAPE.DONUT),
     (r"\b(compar|versus|contrast|alternative|option)\b",    MSO_SHAPE.DIAMOND),
     (r"\b(data|analytic|metric|measur|report|dashboard)\b", MSO_SHAPE.RECTANGLE),
     (r"\b(govern|polic|regulat|law|compliance)\b",          MSO_SHAPE.PENTAGON),
     (r"\b(climate|environment|green|sustain|carbon)\b",     MSO_SHAPE.SUN),
+    (r"\b(insur|underwrit|claim|actuar|pension)\b",         MSO_SHAPE.PENTAGON),
     (r"\b(health|care|medic|well)\b",                       MSO_SHAPE.HEART),
+    (r"\b(market|position|competi|benchmark|leader)\b",     MSO_SHAPE.UP_ARROW),
+    (r"\b(revenue|profit|earning|margin|fiscal)\b",         MSO_SHAPE.OVAL),
 ]
 
 
@@ -430,6 +444,7 @@ _MSO_ID_TO_NAME: dict[int, str] = {
     int(MSO_SHAPE.SUN):            "sun",
     int(MSO_SHAPE.RECTANGLE):      "square",
     int(MSO_SHAPE.OVAL):           "circle",
+    int(MSO_SHAPE.HEXAGON):        "hexagon",
 }
 
 # Forward lookup: name string → MSO_SHAPE enum (used by draw_icon_glyph)
@@ -446,6 +461,7 @@ _NAME_TO_MSO: dict[str, int] = {
     "sun":            MSO_SHAPE.SUN,
     "square":         MSO_SHAPE.RECTANGLE,
     "circle":         MSO_SHAPE.OVAL,
+    "hexagon":        MSO_SHAPE.HEXAGON,
     "dot":            MSO_SHAPE.OVAL,
 }
 

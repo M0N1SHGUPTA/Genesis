@@ -150,7 +150,9 @@ def add_textbox(
     tf = txBox.text_frame
     tf.word_wrap = word_wrap   # prevents text from spilling outside the box boundary
     try:
-        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        # NONE keeps text at the specified size and wraps — TEXT_TO_FIT_SHAPE
+        # was shrinking fonts to unreadable sizes when boxes were small.
+        tf.auto_size = MSO_AUTO_SIZE.NONE
     except Exception:
         pass
 
@@ -224,7 +226,8 @@ def add_bullet_textbox(
     tf = txBox.text_frame
     tf.word_wrap = True   # essential — bullets can be long
     try:
-        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        # NONE keeps bullets at specified size and wraps — prevents tiny text.
+        tf.auto_size = MSO_AUTO_SIZE.NONE
     except Exception:
         pass
 

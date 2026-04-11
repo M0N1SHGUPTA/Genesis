@@ -525,7 +525,7 @@ def _timeline(slide, data: dict) -> None:
             align=PP_ALIGN.CENTER,
         )
 
-        # Description below heading — uses secondary color for better contrast
+        # Description below heading
         desc = _truncate(step.get("description", ""), 15)
         add_textbox(
             slide, desc,
@@ -533,7 +533,7 @@ def _timeline(slide, data: dict) -> None:
             top=line_y + circle_r + Inches(0.68),
             width=step_width, height=Inches(1.8),
             font_size=Pt(11),
-            color=config.COLOR_TEXT_SECONDARY,
+            color=config.COLOR_TEXT_DARK,
             align=PP_ALIGN.CENTER,
         )
 
@@ -589,7 +589,7 @@ def _process_flow(slide, data: dict) -> None:
             slide, desc,
             left=left + PAD, top=box_top + Inches(1.2),
             width=box_width - 2 * PAD, height=Inches(1.1),
-            font_size=Pt(11), color=config.COLOR_TEXT_SECONDARY,
+            font_size=Pt(11), color=config.COLOR_TEXT_DARK,
             align=PP_ALIGN.CENTER,
         )
 
@@ -716,14 +716,14 @@ def _icon_list(slide, data: dict) -> None:
             font_name=config.TITLE_FONT,
         )
 
-        # Description below heading — secondary color for readable contrast
+        # Description below heading
         desc = _truncate(item.get("description", ""), 20)
         add_textbox(
             slide, desc,
             left=text_left, top=row_top + Inches(0.42),
             width=text_width, height=row_height - Inches(0.45),
             font_size=config.BODY_FONT_SIZE,
-            color=config.COLOR_TEXT_SECONDARY,
+            color=config.COLOR_TEXT_DARK,
         )
 
         # Separator line (skip last row)
@@ -798,8 +798,13 @@ def _single_focus(slide, data: dict) -> None:
 # card — an information-dense page that matches target page 3.
 # ---------------------------------------------------------------------------
 
+
 def _six_cards(slide, data: dict) -> None:
-    """Render a 3×2 grid of small icon cards.
+    """Render a 3×2 grid of visually strong icon-header cards.
+
+    Each card has a primary-colored header strip (icon + heading bold) and a
+    light card body with descriptive text. Matches the target deck category-
+    tile style where each card has a distinct colored header band.
 
     Blueprint key expected:
         cards  (list of {heading, points|description})  — 4–6 items
@@ -833,9 +838,11 @@ def _six_cards(slide, data: dict) -> None:
 
     cols = 3
     rows = 2 if len(cards) > 3 else 1
-    card_gap = Inches(0.25)
+    card_gap = CGAP
     card_w = (CW - (cols - 1) * card_gap) / cols
     card_h = (CH - GAP - (rows - 1) * card_gap) / rows
+    header_h = Inches(0.38)
+    header_text_color = pick_contrasting_text(config.COLOR_PRIMARY)
 
     for i, card_data in enumerate(cards):
         row = i // cols
@@ -844,7 +851,6 @@ def _six_cards(slide, data: dict) -> None:
         cy = CT + row * (card_h + card_gap)
 
         heading = card_data.get("heading", "")
-        # Support both "description" (single string) and "points" (list)
         body = card_data.get("description", "")
         if not body:
             pts = card_data.get("points", [])
@@ -852,26 +858,50 @@ def _six_cards(slide, data: dict) -> None:
 
         icon = card_data.get("icon") or icon_for_text(heading)
 
-        draw_card_with_divider(
-            slide,
-            left=cx, top=cy,
-            width=card_w, height=card_h,
-            heading=_heading_truncate(heading, 5),
-            body=_truncate(body, 22),
-            icon_name=icon,
-            heading_size=Pt(13),
-            body_size=Pt(10),
+        # ---- Card background ----
+        card = slide.shapes.add_shape(1, cx, cy, card_w, card_h)
+        style_shape(card, fill_color=config.COLOR_CARD_BG, line_color=config.COLOR_CARD_BORDER)
+
+        # ---- Primary-colored header strip ----
+        # The most visible identity element: each card gets a bold colored
+        # header that immediately reads as a section/category label.
+        header = slide.shapes.add_shape(1, cx, cy, card_w, header_h)
+        style_shape(header, fill_color=config.COLOR_PRIMARY, line_color=None)
+
+        # Small icon inside the header strip (white/contrasting glyph)
+        icon_size = Inches(0.22)
+        draw_icon_glyph(
+            slide, icon,
+            left=cx + PAD,
+            top=cy + (header_h - icon_size) / 2,
+            size=icon_size,
+            fill=header_text_color,
         )
 
+        # Heading text inside the header (bold, contrasting color)
+        add_textbox(
+            slide, _heading_truncate(heading, 6),
+            left=cx + PAD + icon_size + Inches(0.08),
+            top=cy + Inches(0.04),
+            width=card_w - 2 * PAD - icon_size - Inches(0.08),
+            height=header_h - Inches(0.04),
+            font_size=Pt(12), bold=True,
+            color=header_text_color,
+            font_name=config.TITLE_FONT,
+        )
 
-# ---------------------------------------------------------------------------
-# Layout: five_cards_row
-# Single horizontal row of 5 cards on a red full-bleed background.
-# Matches target pages 2 and 10. Used for recap/conclusion slides
-# where you want a punchy overview of 5 key items.
-# This is a full-bleed layout — it paints its own title via a red top
-# pill and skips add_slide_title in the dispatcher.
-# ---------------------------------------------------------------------------
+        # ---- Body text below header ----
+        # Dark text on light card background for maximum readability.
+        body_top = cy + header_h + PAD
+        body_h = card_h - header_h - 2 * PAD
+        if body_h > Inches(0.2):
+            add_textbox(
+                slide, _truncate(body, 22),
+                left=cx + PAD, top=body_top,
+                width=card_w - 2 * PAD, height=body_h,
+                font_size=Pt(10),
+                color=config.COLOR_TEXT_DARK,
+            )
 
 def _five_cards_row(slide, data: dict) -> None:
     """Render a horizontal row of 4–5 white icon-cards on a red background.
@@ -1009,7 +1039,7 @@ def _two_col_sidebar(slide, data: dict) -> None:
 
     # Render each group as a stacked card
     n = len(groups)
-    card_gap = Inches(0.3)
+    card_gap = CGAP  # consistent spacing from config
     card_h = (right_bottom - right_top - (n - 1) * card_gap) / n
 
     for i, grp in enumerate(groups):

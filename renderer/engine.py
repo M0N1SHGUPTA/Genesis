@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
@@ -92,6 +94,11 @@ class Renderer:
         # Step 2: Load the template — this copies all Slide Master layouts into memory
         prs = Presentation(template)
 
+        # Step 2b: Extract the template's real theme colors and overwrite config
+        # globals so every renderer module (layouts, charts, tables, visuals)
+        # automatically uses the template's palette instead of the hardcoded red.
+        self._apply_theme_colors(prs)
+
         # Step 3: Record the number of original template placeholder slides.
         # We'll use this count later to remove them after adding our content slides.
         original_slide_count = len(prs.slides)
@@ -126,54 +133,375 @@ class Renderer:
     # ------------------------------------------------------------------
 
     def _select_template(self, parsed: dict) -> str:
-        """Determine which template file to use.
+        """Intelligently select the best template for the document.
 
-        If an explicit template_path was set at construction, use it directly.
-        Otherwise, scan the templates_dir for .pptx files and score each one
-        by counting how many words from the document title appear in the filename.
-        The highest-scoring template is selected.
+        Strategy:
+          1. If --template was passed, use it directly.
+          2. Profile every .pptx in the templates folder (colors, mood, layouts).
+          3. Use keyword heuristic (fast, deterministic, well-tuned).
+          4. Only use LLM as tiebreaker when top-2 scores are within 10%.
 
         Args:
-            parsed: Parsed document dict (for title keyword extraction).
+            parsed: Parsed document dict (title, sections, exec summary).
 
         Returns:
-            Absolute or relative path string to the selected .pptx template.
+            Path string to the selected .pptx template.
 
         Raises:
-            FileNotFoundError: If no template can be found anywhere.
+            FileNotFoundError: If no templates exist.
         """
-        # If the user explicitly provided a template, just use it
         if self.template_path:
             return self.template_path
 
-        # Scan the templates directory for all .pptx files
-        templates = list(Path(self.templates_dir).glob("*.pptx"))
+        templates = sorted(Path(self.templates_dir).glob("*.pptx"))
         if not templates:
             raise FileNotFoundError(
                 f"No .pptx templates found in '{self.templates_dir}'. "
                 "Add at least one Slide Master .pptx file or use --template."
             )
-
-        # If there's only one template, no need to score — just use it
         if len(templates) == 1:
             return str(templates[0])
 
-        # Score each template: count words from the document title (>3 chars)
-        # that appear in the template's filename stem
-        title = parsed.get("title", "").lower()
-        best = templates[0]
-        best_score = 0
+        # Build a profile for each template (colors → mood)
+        profiles = [self._profile_template(tpl) for tpl in templates]
+        doc_summary = self._build_doc_summary(parsed)
 
-        for tpl in templates:
-            # Normalise the filename (remove underscores/hyphens → spaces) for word matching
-            stem = tpl.stem.lower().replace("_", " ").replace("-", " ")
-            score = sum(1 for word in title.split() if len(word) > 3 and word in stem)
+        # Heuristic first (fast, deterministic, well-tuned keywords)
+        idx, scores = self._heuristic_pick_template(profiles, doc_summary)
+
+        # If top-2 scores are very close, use LLM as tiebreaker
+        if scores is not None and len(scores) >= 2:
+            sorted_scores = sorted(scores, reverse=True)
+            top, second = sorted_scores[0], sorted_scores[1]
+            if top > 0 and second / top > 0.9:
+                try:
+                    llm_idx = self._llm_pick_template(profiles, doc_summary)
+                    if 0 <= llm_idx < len(templates):
+                        logger.info(
+                            "Auto-selected template: %s (LLM tiebreaker, heuristic was close)",
+                            templates[llm_idx].name,
+                        )
+                        return str(templates[llm_idx])
+                except Exception as exc:
+                    logger.debug("LLM tiebreaker failed: %s — using heuristic winner.", exc)
+
+        logger.info("Auto-selected template: %s (heuristic)", templates[idx].name)
+        return str(templates[idx])
+
+    # ------------------------------------------------------------------
+    # Template profiling helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _profile_template(tpl_path: Path) -> dict:
+        """Read a template and extract its visual identity.
+
+        Returns a dict with filename, layout names, accent colors, and a
+        human-readable mood string (e.g. "red/corporate, dark/formal").
+        """
+        prs = Presentation(str(tpl_path))
+        layout_names = [l.name for l in prs.slide_layouts]
+
+        accent_colors: dict[str, str] = {}
+        theme_name = "Unknown"
+
+        for rel in prs.part.rels.values():
+            if "theme" not in str(rel.reltype).lower():
+                continue
+            theme_xml = rel.target_part.blob.decode("utf-8", errors="ignore")
+
+            m = re.search(r'<a:theme[^>]*name="([^"]+)"', theme_xml)
+            if m:
+                theme_name = m.group(1)
+
+            for tag, val in re.findall(
+                r"<a:(\w+)>\s*<a:srgbClr val=\"([A-Fa-f0-9]{6})\"", theme_xml
+            ):
+                accent_colors[tag] = val
+            break
+
+        mood = Renderer._color_mood(accent_colors)
+
+        return {
+            "filename": tpl_path.name,
+            "path": str(tpl_path),
+            "layouts": layout_names,
+            "theme_name": theme_name,
+            "accent_colors": accent_colors,
+            "mood": mood,
+        }
+
+    @staticmethod
+    def _color_mood(accent_colors: dict[str, str]) -> str:
+        """Derive a mood description from the primary accent colors only.
+
+        Only accent1 and accent2 are considered — these define the template's
+        dominant visual identity. Secondary accents (accent3–6) are ignored
+        because most templates include a full rainbow that would blur the signal.
+        """
+        moods: list[str] = []
+        for key in ("accent1", "accent2"):
+            hex_val = accent_colors.get(key, "")
+            if len(hex_val) != 6:
+                continue
+            r = int(hex_val[:2], 16)
+            g = int(hex_val[2:4], 16)
+            b = int(hex_val[4:6], 16)
+
+            if r > 180 and g < 100 and b < 100:
+                moods.append("red/corporate")
+            elif r > 180 and g > 80 and b < 80:
+                moods.append("orange/warm")
+            elif g > max(r, b) and g > 80:
+                moods.append("green/sustainability")
+            elif b > max(r, g) and b > 120:
+                moods.append("blue/technology")
+            elif r < 60 and g < 60 and b < 60:
+                moods.append("dark/formal")
+        return ", ".join(dict.fromkeys(moods)) or "neutral/professional"
+
+    @staticmethod
+    def _build_doc_summary(parsed: dict) -> str:
+        """Build a compact text summary for template matching."""
+        title = parsed.get("title", "Untitled")
+        subtitle = (parsed.get("subtitle", "") or "")[:120]
+        headings = [s.get("heading", "") for s in parsed.get("sections", [])]
+        exec_sum = (parsed.get("executive_summary", "") or "")[:250]
+        return (
+            f"Title: {title}\n"
+            f"Subtitle: {subtitle}\n"
+            f"Sections: {', '.join(headings)}\n"
+            f"Summary: {exec_sum}"
+        )
+
+    def _llm_pick_template(
+        self, profiles: list[dict], doc_summary: str
+    ) -> int:
+        """Use the LLM to pick the best template (one fast call).
+
+        Returns a 0-based template index.
+        Raises on any failure so the caller can fall back to heuristics.
+        """
+        from agents.base_agent import BaseAgent, MODEL  # noqa: PLC0415
+
+        clients = BaseAgent._clients
+        if not clients:
+            raise ValueError("No Groq clients available for template selection.")
+
+        idx = BaseAgent._client_index % len(clients)
+        BaseAgent._client_index += 1
+        client = clients[idx]
+
+        # Build concise template descriptions for the LLM
+        tpl_lines: list[str] = []
+        for i, p in enumerate(profiles):
+            accents = ", ".join(
+                f"{k}=#{v}"
+                for k, v in p["accent_colors"].items()
+                if k.startswith("accent")
+            )
+            tpl_lines.append(
+                f"Template {i + 1}: \"{p['filename']}\"  |  "
+                f"Mood: {p['mood']}  |  "
+                f"Layouts: {', '.join(p['layouts'])}  |  "
+                f"Colors: {accents}"
+            )
+
+        prompt = (
+            "Pick the single best PowerPoint template for this presentation.\n\n"
+            f"DOCUMENT:\n{doc_summary}\n\n"
+            f"TEMPLATES:\n" + "\n".join(tpl_lines) + "\n\n"
+            "Match the document's topic to the template whose color mood fits best.\n"
+            f"Reply with ONLY a number from 1 to {len(profiles)}. No explanation."
+        )
+
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a design expert. Pick the best matching "
+                        "template. Reply with only the number."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=5,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        match = re.search(r"\d+", text)
+        if match:
+            return int(match.group()) - 1  # 1-based → 0-based
+        raise ValueError(f"Could not parse template number from LLM: {text}")
+
+    @staticmethod
+    def _heuristic_pick_template(
+        profiles: list[dict], doc_summary: str
+    ) -> tuple[int, list[int]]:
+        """Score templates against document keywords (no LLM needed).
+
+        Returns:
+            Tuple of (best_index, list_of_scores_per_template).
+        """
+        doc_lower = doc_summary.lower()
+
+        # Strong-signal keywords that UNIQUELY identify a topic.
+        # Ambiguous words (investment, market, strategy, growth, tech) are
+        # excluded because they appear across domains (e.g. "tech acquisitions"
+        # is corporate, not tech).
+        GREEN_KW = {
+            "sustainability", "environment", "renewable", "solar",
+            "wind", "climate", "carbon", "emission", "biodiversity",
+            "esg", "conservation", "photovoltaic", "decarbonization",
+        }
+        TECH_KW = {
+            "ai", "technology", "digital", "software", "cyber", "cloud",
+            "automation", "innovation", "machine", "blockchain", "saas",
+            "infrastructure", "algorithm", "neural", "computing",
+            "artificial", "bubble",
+        }
+        CORP_KW = {
+            "acquisition", "merger", "consulting", "enterprise", "portfolio",
+            "corporate", "management", "revenue", "valuation",
+            "stakeholder", "governance", "compliance", "fiscal",
+            "realignment", "reinvention",
+        }
+
+        # Use whole-word matching (prevents "ai" matching inside "sustainability")
+        doc_words = set(re.findall(r"\b[a-z0-9]+\b", doc_lower))
+
+        # Split title from body — title matches are a stronger signal
+        title_line = doc_lower.split("\n")[0] if "\n" in doc_lower else doc_lower
+        title_words = set(re.findall(r"\b[a-z0-9]+\b", title_line))
+
+        # Count keyword OCCURRENCES in full text (not just presence) for body,
+        # so a doc that mentions "acquisition" 30 times outscores one that
+        # mentions it once.
+        def _freq_score(keywords: set[str], text: str) -> int:
+            return sum(
+                len(re.findall(r"\b" + re.escape(kw) + r"\b", text))
+                for kw in keywords
+            )
+
+        best_idx = 0
+        best_score = -1
+        all_scores: list[int] = []
+
+        for i, p in enumerate(profiles):
+            score = 0
+            mood = p.get("mood", "").lower()
+
+            if "green" in mood or "sustainability" in mood:
+                kw = GREEN_KW
+            elif "blue" in mood or "technology" in mood:
+                kw = TECH_KW
+            elif "orange" in mood or "warm" in mood:
+                kw = CORP_KW
+            else:
+                kw = CORP_KW | TECH_KW
+
+            # Title matches (strong signal)
+            score += len(kw & title_words) * 20
+            # Body frequency (volume signal)
+            score += _freq_score(kw, doc_lower)
+
+            all_scores.append(score)
             if score > best_score:
                 best_score = score
-                best = tpl
+                best_idx = i
 
-        logger.info("Auto-selected template: %s (score=%d)", best.name, best_score)
-        return str(best)
+        return best_idx, all_scores
+
+    # ------------------------------------------------------------------
+    # Theme color application
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _apply_theme_colors(prs: Presentation) -> None:
+        """Extract the template's accent colors and overwrite config globals.
+
+        This makes every reference to config.COLOR_PRIMARY, COLOR_CARD_BG,
+        COLOR_CARD_BORDER, COLOR_HEADER_BG, and CHART_COLORS automatically
+        use the template's real palette instead of the hardcoded red defaults.
+        """
+        from lxml import etree  # noqa: PLC0415
+
+        try:
+            master = prs.slide_masters[0]
+            theme_part = master.part.part_related_by(
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme"
+            )
+            root = etree.fromstring(theme_part.blob)
+            ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+            color_map: dict[str, RGBColor] = {}
+            for elem in root.iter(f"{{{ns}}}srgbClr"):
+                val = elem.get("val", "")
+                if len(val) == 6:
+                    try:
+                        r, g, b = int(val[:2], 16), int(val[2:4], 16), int(val[4:6], 16)
+                        parent_tag = elem.getparent().tag.split("}")[-1]
+                        color_map[parent_tag] = RGBColor(r, g, b)
+                    except ValueError:
+                        pass
+
+            if not color_map:
+                return
+
+            raw_accent1 = color_map.get("accent1")
+            accent2 = color_map.get("accent2")
+
+            # If accent1 is very light (a tint/background color), promote accent2
+            # to primary — e.g. template 3 has accent1=#EFF3E5 (pastel) but
+            # accent2=#33621A (the actual brand green).
+            if raw_accent1 and (raw_accent1[0] + raw_accent1[1] + raw_accent1[2]) / 3 > 200:
+                primary = accent2 or raw_accent1
+            else:
+                primary = raw_accent1 or config.COLOR_PRIMARY
+
+            if accent2 is None:
+                accent2 = primary
+            dk1 = color_map.get("dk1", config.COLOR_TEXT_DARK)
+            lt1 = color_map.get("lt1", config.COLOR_TEXT_LIGHT)
+
+            # Derive card background: a very light tint of the primary color
+            pr, pg, pb = primary[0], primary[1], primary[2]
+            card_bg = RGBColor(
+                min(255, 230 + pr // 10),
+                min(255, 230 + pg // 10),
+                min(255, 230 + pb // 10),
+            )
+
+            # Overwrite the config module globals in-place
+            config.COLOR_PRIMARY = primary
+            config.COLOR_CARD_BORDER = primary
+            config.COLOR_HEADER_BG = primary
+            config.COLOR_CARD_BG = card_bg
+            config.COLOR_TEXT_DARK = dk1
+            config.COLOR_TEXT_LIGHT = lt1
+
+            # Rebuild chart colors from the template palette
+            config.CHART_COLORS = [
+                primary,
+                dk1,
+                card_bg,
+                RGBColor(0x66, 0x66, 0x66),
+                accent2,
+                RGBColor(
+                    max(0, pr - 40), max(0, pg - 40), max(0, pb - 40),
+                ),
+            ]
+
+            logger.info(
+                "Theme colors applied: primary=#%02X%02X%02X, accent2=#%02X%02X%02X",
+                primary[0], primary[1], primary[2],
+                accent2[0], accent2[1], accent2[2],
+            )
+
+        except Exception as exc:
+            logger.debug("Could not extract theme colors: %s — using defaults.", exc)
 
     # ------------------------------------------------------------------
     # Slide dispatch

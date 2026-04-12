@@ -8,9 +8,8 @@ venv/
 
 # Python cache
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
-*.pyd
 
 # Outputs (generated files)
 outputs/
